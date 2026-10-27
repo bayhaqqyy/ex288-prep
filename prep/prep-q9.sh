@@ -17,6 +17,7 @@ GIT_PASS="d3v3lop3r"
 NEXUS_NPM="http://nexus-infra.apps.ocp4.example.com/repository/npm"
 CLASS_REGISTRY="registry.ocp4.example.com:8443"
 SET_DIR="/home/student/ex288-set2"
+export GIT_TERMINAL_PROMPT=0
 
 log()  { echo -e "\n\033[1;34m[prep]\033[0m $*"; }
 warn() { echo -e "\033[1;33m[warn]\033[0m $*"; }
@@ -29,20 +30,54 @@ login_admin() {
   oc login -u "${OCP_ADMIN}" -p "${OCP_ADMIN_PASS}" "${OCP_API}" >/dev/null
 }
 
-# reset_project <nama>: hapus project lama (kalau ada) lalu buat baru
+# Cek namespace pakai admin di kubeconfig terpisah: developer tidak bisa
+# melihat project yang sedang Terminating, jadi tanpa ini project dianggap
+# sudah hilang padahal namespace-nya masih ada.
+ADMIN_KC="$(mktemp)"
+trap 'rm -f "$ADMIN_KC"' EXIT
+ADMIN_OK=0
+if KUBECONFIG="$ADMIN_KC" oc login -u "${OCP_ADMIN}" -p "${OCP_ADMIN_PASS}" "${OCP_API}" >/dev/null 2>&1 \
+   || KUBECONFIG="$ADMIN_KC" oc login -u "${OCP_ADMIN}" -p "${OCP_ADMIN_PASS}" "${OCP_API}" --insecure-skip-tls-verify=true >/dev/null 2>&1; then
+  ADMIN_OK=1
+fi
+
+ns_exists() {
+  if [ "$ADMIN_OK" -eq 1 ]; then
+    KUBECONFIG="$ADMIN_KC" oc get namespace "$1" >/dev/null 2>&1
+  else
+    oc get project "$1" >/dev/null 2>&1
+  fi
+}
+
+# wait_ns_gone <nama> [detik]: tunggu sampai namespace benar-benar hilang
+wait_ns_gone() {
+  local p="$1" max="${2:-420}" t=0
+  while ns_exists "$p"; do
+    if [ "$t" -ge "$max" ]; then
+      echo
+      warn "Project $p masih Terminating setelah ${max}s. Cek: oc get ns $p -o yaml (sebagai admin)"
+      return 1
+    fi
+    [ "$t" -eq 0 ] && printf '\033[1;34m[prep]\033[0m Menunggu project %s selesai terhapus ' "$p"
+    printf '.'
+    sleep 5; t=$((t + 5))
+  done
+  [ "$t" -gt 0 ] && echo " hilang (${t}s)"
+  return 0
+}
+
+# reset_project <nama>: hapus project lama (kalau ada), tunggu hilang, buat baru
 reset_project() {
   local p="$1"
-  if oc get project "$p" >/dev/null 2>&1; then
+  if ns_exists "$p"; then
     log "Menghapus project lama $p ..."
-    oc delete project "$p" --wait=true >/dev/null
-    # tunggu sampai benar-benar hilang
-    for _ in $(seq 1 60); do
-      oc get project "$p" >/dev/null 2>&1 || break
-      sleep 3
-    done
+    oc delete project "$p" --wait=false >/dev/null 2>&1 \
+      || { [ "$ADMIN_OK" -eq 1 ] && KUBECONFIG="$ADMIN_KC" oc delete namespace "$p" --wait=false >/dev/null 2>&1; } \
+      || true
   fi
+  wait_ns_gone "$p"
   log "Membuat project $p"
-  for _ in $(seq 1 20); do
+  for _ in $(seq 1 40); do
     oc new-project "$p" >/dev/null 2>&1 && return 0
     sleep 3
   done
@@ -73,7 +108,7 @@ store_git_cred() {
 
 check_npm_pkg() {
   local pkg="$1"
-  if curl -sf -o /dev/null "${NEXUS_NPM}/${pkg}"; then
+  if curl -sf --max-time 10 -o /dev/null "${NEXUS_NPM}/${pkg}"; then
     log "Nexus punya paket npm '${pkg}'"
   else
     warn "Paket npm '${pkg}' tidak terjangkau di ${NEXUS_NPM}. Build bisa gagal karena lingkungan, bukan karena jawabanmu."

@@ -34,15 +34,15 @@ for q in "${QS[@]}"; do
     continue
   fi
   log="$LOG_DIR/prep-q$q.log"
-  printf '%s' "${B}[$(date +%T)] Menyiapkan soal $q ...${N} "
-  if ( cd "$HOME" && bash "$script" ) >"$log" 2>&1; then
-    echo "${G}OK${N}"
+  echo "${B}[$(date +%T)] ===== Menyiapkan soal $q =====${N}"
+  if ( set -o pipefail; cd "$HOME" && bash "$script" </dev/null 2>&1 | tee "$log" | sed 's/^/    /' ); then
+    echo "${G}[$(date +%T)] Soal $q OK${N}"
     RESULT[$q]="OK"
   else
-    echo "${R}GAGAL${N} (lihat $log)"
-    tail -n 5 "$log" | sed 's/^/    /'
+    echo "${R}[$(date +%T)] Soal $q GAGAL${N} (log: $log)"
     RESULT[$q]="GAGAL"
   fi
+  echo
 done
 
 echo

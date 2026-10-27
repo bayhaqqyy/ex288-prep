@@ -66,12 +66,30 @@ fi
 
 oc whoami >/dev/null 2>&1 || oc login -u developer -p developer "$OCP_API" >/dev/null
 
+# Cek namespace pakai admin di kubeconfig terpisah. Developer tidak bisa
+# melihat project yang sedang Terminating, jadi tanpa ini project dianggap
+# sudah hilang padahal namespace-nya masih ada.
+ADMIN_KC="$(mktemp)"
+trap 'rm -f "$ADMIN_KC"' EXIT
+ADMIN_OK=0
+if KUBECONFIG="$ADMIN_KC" oc login -u admin -p redhatocp "$OCP_API" >/dev/null 2>&1 \
+   || KUBECONFIG="$ADMIN_KC" oc login -u admin -p redhatocp "$OCP_API" --insecure-skip-tls-verify=true >/dev/null 2>&1; then
+  ADMIN_OK=1
+fi
+ns_exists() {
+  if [ "$ADMIN_OK" -eq 1 ]; then KUBECONFIG="$ADMIN_KC" oc get namespace "$1" >/dev/null 2>&1
+  else oc get project "$1" >/dev/null 2>&1; fi
+}
+
 # Hapus project (tanpa menunggu satu per satu)
 for p in $ALL_PROJECTS; do
-  if oc get project "$p" >/dev/null 2>&1; then
-    oc delete project "$p" --wait=false >/dev/null 2>&1 \
-      && echo "  ${G}hapus${N} project $p" \
-      || echo "  ${Y}gagal${N} hapus project $p (cek hak akses)"
+  if ns_exists "$p"; then
+    if oc delete project "$p" --wait=false >/dev/null 2>&1 \
+       || { [ "$ADMIN_OK" -eq 1 ] && KUBECONFIG="$ADMIN_KC" oc delete namespace "$p" --wait=false >/dev/null 2>&1; }; then
+      echo "  ${G}hapus${N} project $p"
+    else
+      echo "  ${Y}gagal${N} hapus project $p (cek hak akses)"
+    fi
   else
     echo "  lewati  project $p (tidak ada)"
   fi
@@ -107,15 +125,21 @@ if [ "$EXTRA" -eq 1 ]; then
 fi
 
 echo
-echo "Menunggu project terhapus..."
-for _ in $(seq 1 60); do
+echo "Menunggu semua project benar-benar terhapus (bisa 1-5 menit)..."
+t=0; left=""
+while :; do
   left=""
-  for p in $ALL_PROJECTS; do oc get project "$p" >/dev/null 2>&1 && left="$left $p"; done
+  for p in $ALL_PROJECTS; do ns_exists "$p" && left="$left $p"; done
   [ -z "$left" ] && break
-  sleep 5
+  [ "$t" -ge 420 ] && break
+  printf '\r  masih Terminating:%-60s (%ss)' "$left" "$t"
+  sleep 5; t=$((t + 5))
 done
-if [ -n "${left:-}" ]; then
-  echo "${Y}Masih dalam proses terhapus:${N}$left (biasanya selesai dalam 1-2 menit)"
-else
-  echo "${G}Selesai. Semua project soal sudah bersih.${N}"
+echo
+if [ -n "$left" ]; then
+  echo "${Y}Masih Terminating setelah ${t}s:${N}$left"
+  echo "Cek sebagai admin: oc get ns$left ; jalankan cleanup lagi nanti sebelum prep."
+  exit 1
 fi
+[ "$ADMIN_OK" -eq 1 ] || echo "${Y}Catatan: login admin gagal, pengecekan memakai developer (kurang akurat).${N}"
+echo "${G}Selesai. Semua project soal sudah benar-benar bersih.${N}"
