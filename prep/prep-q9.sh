@@ -52,7 +52,7 @@ reset_project() {
 # push_repo <dir> <nama-repo> <branch>
 push_repo() {
   local dir="$1" repo="$2" branch="$3"
-  ( cd "$dir"
+  ( cd "$dir" || exit 1
     rm -rf .git
     git init -q -b "$branch"
     git config user.name "Student"
@@ -65,6 +65,7 @@ push_repo() {
 }
 
 store_git_cred() {
+  cd "$HOME"
   git config --global credential.helper store
   echo "https://${GIT_USER}:${GIT_PASS}@${GIT_HOST}" > ~/.git-credentials
   chmod 600 ~/.git-credentials
@@ -105,7 +106,7 @@ cat > README.md <<'EOF'
 Aplikasi latihan EX288 yang di-build dan di-deploy lewat OpenShift Pipelines.
 EOF
 push_repo "$WORK/repo" tekton-web main
-rm -rf "$WORK/repo"
+cd "$HOME"; rm -rf "$WORK/repo"
 
 # Skeleton pipeline untuk dilengkapi peserta
 cat > "$WORK/pipeline-skeleton.yaml" <<'EOF'

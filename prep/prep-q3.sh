@@ -52,7 +52,7 @@ reset_project() {
 # push_repo <dir> <nama-repo> <branch>
 push_repo() {
   local dir="$1" repo="$2" branch="$3"
-  ( cd "$dir"
+  ( cd "$dir" || exit 1
     rm -rf .git
     git init -q -b "$branch"
     git config user.name "Student"
@@ -65,6 +65,7 @@ push_repo() {
 }
 
 store_git_cred() {
+  cd "$HOME"
   git config --global credential.helper store
   echo "https://${GIT_USER}:${GIT_PASS}@${GIT_HOST}" > ~/.git-credentials
   chmod 600 ~/.git-credentials
@@ -109,6 +110,6 @@ EOF
 chmod +x .s2i/bin/run
 
 push_repo "$WORK" portal-s2i main
-rm -rf "$WORK"
+cd "$HOME"; rm -rf "$WORK"
 store_git_cred
 log "Soal 3 siap. Project: deploy-portal"
