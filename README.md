@@ -6,7 +6,7 @@ Set latihan untuk ujian **EX288 (Red Hat Certified OpenShift Application Develop
 | --- | --- |
 | [`SOAL.md`](SOAL.md) | 10 soal, tanpa jawaban |
 | [`KUNCI.md`](KUNCI.md) | Kunci jawaban dan verifikasi per soal |
-| [`prep/`](prep/) | Script preparation `prep-q1.sh` … `prep-q10.sh` |
+| [`prep/`](prep/) | Script preparation `prep-q1.sh` … `prep-q10.sh`, `prep-all.sh` (semua sekaligus), `cleanup.sh` (bersih-bersih) |
 | [`grade/grade.sh`](grade/grade.sh) | Script penilaian otomatis, total 300 (lulus 210) |
 
 ## Daftar soal
@@ -52,13 +52,29 @@ Di workstation lab, sebagai user `student`:
     git ls-remote https://git.ocp4.example.com/developer/legacy-web.git
     ```
 
-2. Clone repo ini dan siapkan satu soal:
+2. Clone repo ini dan siapkan soal:
 
     ```bash
     git clone https://github.com/bayhaqqyy/ex288-prep.git
-    cd ex288-prep/prep
-    bash prep-q1.sh        # siapkan satu soal saja
+    cd ex288-prep
+
+    bash prep/prep-all.sh          # siapkan semua soal 1-10 sekaligus
+    bash prep/prep-all.sh 2 6 7    # atau soal tertentu saja
+    bash prep/prep-q1.sh           # atau satu soal langsung
     ```
+
+    `prep-all.sh` menjalankan setiap prep berurutan. Kalau satu soal gagal, soal lain tetap disiapkan, lalu muncul ringkasan OK/GAGAL. Log per soal ada di `/home/student/ex288-set2/logs/`.
+
+3. Setelah selesai latihan, bersihkan:
+
+    ```bash
+    bash prep/cleanup.sh               # hapus project + file lab soal 1-10 (minta konfirmasi)
+    bash prep/cleanup.sh 2 7           # soal tertentu saja
+    bash prep/cleanup.sh -y            # tanpa konfirmasi
+    bash prep/cleanup.sh --all-extra   # + clone lokal repo latihan, image podman, default route registry off
+    ```
+
+    Repo di GitLab lab tidak dihapus karena butuh token API. Prep berikutnya menimpa isinya, jadi aman dibiarkan.
 
 Kalau `oc new-app` menampilkan `warning: Cannot check if git requires authentication` lalu `none of the arguments provided could be classified as a source code location`, berarti langkah 1 belum jalan. Ulangi langkah 1, lalu coba lagi.
 
