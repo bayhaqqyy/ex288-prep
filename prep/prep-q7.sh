@@ -115,17 +115,41 @@ reset_project() {
 }
 
 # push_repo <dir> <nama-repo> <branch>
+# Tanpa force push (branch di GitLab lab otomatis protected setelah push
+# pertama). Kalau repo/branch sudah ada: clone history-nya, ganti isinya
+# dengan file soal asli, commit "reset soal", lalu push biasa.
 push_repo() {
-  local dir="$1" repo="$2" branch="$3"
-  ( cd "$dir" || exit 1
+  local dir="$1" repo="$2" branch="$3" url tmp rc
+  url="https://${GIT_USER}:${GIT_PASS}@${GIT_HOST}/${GIT_USER}/${repo}.git"
+  tmp="$(mktemp -d)"
+  (
+    set -e
+    cd "$dir"
     rm -rf .git
-    git init -q -b "$branch"
-    git config user.name "Student"
-    git config user.email "student@ocp4.example.com"
-    git add -A
-    git commit -qm "EX288 practice set 2: initial files"
-    git remote add origin "https://${GIT_USER}:${GIT_PASS}@${GIT_HOST}/${GIT_USER}/${repo}.git"
-    git push -q -u origin "$branch" --force )
+    if git clone -q -b "$branch" "$url" "$tmp/r" >/dev/null 2>&1; then
+      mv "$tmp/r/.git" .git
+      git config user.name "Student"
+      git config user.email "student@ocp4.example.com"
+      git add -A
+      if git diff --cached --quiet; then
+        echo "    repo sudah berisi file soal asli, tidak ada perubahan"
+      else
+        git commit -qm "EX288 practice set 2: reset soal"
+        git push -q origin "$branch"
+      fi
+    else
+      git init -q -b "$branch"
+      git config user.name "Student"
+      git config user.email "student@ocp4.example.com"
+      git add -A
+      git commit -qm "EX288 practice set 2: initial files"
+      git remote add origin "$url"
+      git push -q -u origin "$branch"
+    fi
+  )
+  rc=$?
+  rm -rf "$tmp"
+  [ "$rc" -eq 0 ] || return "$rc"
   log "Repo https://${GIT_HOST}/${GIT_USER}/${repo}.git (branch ${branch}) siap"
 }
 
