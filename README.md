@@ -7,6 +7,7 @@ Set latihan untuk ujian **EX288 (Red Hat Certified OpenShift Application Develop
 | [`SOAL.md`](SOAL.md) | 10 soal, tanpa jawaban |
 | [`KUNCI.md`](KUNCI.md) | Kunci jawaban dan verifikasi per soal |
 | [`prep/`](prep/) | Script preparation `prep-q1.sh` … `prep-q10.sh` |
+| [`grade/grade.sh`](grade/grade.sh) | Script penilaian otomatis, total 300 (lulus 210) |
 
 ## Daftar soal
 
@@ -47,6 +48,43 @@ bash prep-q1.sh        # siapkan satu soal saja
 ```
 
 Lalu kerjakan soal di `SOAL.md` tanpa membuka `KUNCI.md`. Gunakan `oc --help`, `oc explain`, dan dokumentasi OpenShift seperti saat ujian.
+
+## Penilaian (total 300, lulus 210)
+
+Setelah selesai, periksa jawabanmu dengan:
+
+```bash
+cd ex288-prep
+bash grade/grade.sh          # semua soal -> nilai total /300 + LULUS / BELUM LULUS
+bash grade/grade.sh 3 7      # hanya soal tertentu
+```
+
+Setiap soal bernilai 30 poin, dipecah menjadi beberapa pemeriksaan berbobot. Contohnya Soal 7: chart 2.1.0 di Git, release lab dan prod, jumlah Pod, limit/request, label, env, serta route dan TLS. Batas lulus 210/300 (70%), mengikuti EX288.
+
+Cara kerja grader:
+
+- Login sebagai `admin` di KUBECONFIG sementara, jadi sesi `oc` milikmu tidak berubah. Grader hanya membaca, tidak mengubah apa pun.
+- Memeriksa objek di cluster (BuildConfig, Deployment, Route, probe, Pipeline, ImageStream, dan lain-lain).
+- Meng-clone repo Git lab untuk memastikan perbaikan sudah di-push, bukan hanya diubah lokal.
+- Mengakses route dengan `curl` untuk memastikan aplikasi benar-benar merespons.
+- Menyimpan laporan ke `/home/student/ex288-set2/grade-report-<tanggal>.txt`.
+
+Contoh potongan output:
+
+```text
+Soal 7 - Helm lab + production
+  [PASS]  3 poin  Chart di Git: version 2.1.0 dan template me-render resources
+  [PASS]  2 poin  [lab] Release webstore-lab deployed di webstore-lab
+  [FAIL]  4 poin  [prod] Limit 500m/512Mi, request 250m/256Mi
+  ...
+  Subtotal: 26/30
+
+Ringkasan
+  Soal 1     30/30   S2I Node.js: JSON error + prom-client
+  ...
+  TOTAL    254/300
+  LULUS (batas lulus 210/300)
+```
 
 Catatan:
 
