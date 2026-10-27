@@ -41,11 +41,26 @@ Kredensial di atas adalah kredensial standar lab kelas, bukan kredensial produks
 
 Di workstation lab, sebagai user `student`:
 
-```bash
-git clone https://github.com/bayhaqqyy/ex288-prep.git
-cd ex288-prep/prep
-bash prep-q1.sh        # siapkan satu soal saja
-```
+1. Simpan kredensial Git lab. Langkah ini wajib supaya `git clone` dan `oc new-app` bisa membaca repo private di `git.ocp4.example.com` tanpa ditanya password:
+
+    ```bash
+    git config --global credential.helper store
+    echo "https://developer:d3v3lop3r@git.ocp4.example.com" > ~/.git-credentials
+    chmod 600 ~/.git-credentials
+
+    # cek: harus menampilkan hash, tanpa minta password
+    git ls-remote https://git.ocp4.example.com/developer/legacy-web.git
+    ```
+
+2. Clone repo ini dan siapkan satu soal:
+
+    ```bash
+    git clone https://github.com/bayhaqqyy/ex288-prep.git
+    cd ex288-prep/prep
+    bash prep-q1.sh        # siapkan satu soal saja
+    ```
+
+Kalau `oc new-app` menampilkan `warning: Cannot check if git requires authentication` lalu `none of the arguments provided could be classified as a source code location`, berarti langkah 1 belum jalan. Ulangi langkah 1, lalu coba lagi.
 
 Lalu kerjakan soal di `SOAL.md` tanpa membuka `KUNCI.md`. Gunakan `oc --help`, `oc explain`, dan dokumentasi OpenShift seperti saat ujian.
 

@@ -2,6 +2,17 @@
 
 Buka file ini hanya setelah mencoba sendiri. Semua perintah diasumsikan login sebagai `developer` kecuali disebut lain.
 
+Sebelum mengerjakan soal yang memakai repo Git lab (Soal 1, 2, 3, 6, 7, 9), pastikan kredensial Git tersimpan di workstation. Tanpa ini, `oc new-app` gagal membaca repo private:
+
+```bash
+git config --global credential.helper store
+echo "https://developer:d3v3lop3r@git.ocp4.example.com" > ~/.git-credentials
+chmod 600 ~/.git-credentials
+git ls-remote https://git.ocp4.example.com/developer/legacy-web.git   # harus tampil hash
+```
+
+Kredensial di workstation hanya dipakai `oc new-app` dan `git` lokal. Build di cluster tetap butuh secret Git sendiri (basic-auth, di-link ke `builder` atau dipasang sebagai `--source-secret`).
+
 ## Kunci Soal 1
 
 Dua bug: koma hilang di `package.json` (build gagal `EJSONPARSE`), dan `prom-client` tidak ada di dependencies (Pod `CrashLoopBackOff` dengan `Cannot find module 'prom-client'`).
@@ -84,6 +95,15 @@ oc new-app --name=legacy-web --strategy=docker \
 oc logs -f bc/legacy-web
 oc expose service legacy-web
 curl legacy-web-legacy-prod.apps.ocp4.example.com   # legacy-web running in mode: legacy-prod
+```
+
+Alternatif kalau `oc new-app` dengan URL masih gagal membaca repo: jalankan dari root folder hasil clone, `oc` akan memakai URL `origin`:
+
+```bash
+cd ~/legacy-web
+oc new-app . --name=legacy-web --strategy=docker --context-dir=apps/legacy \
+  --build-env npm_config_registry=http://nexus-infra.apps.ocp4.example.com/repository/npm \
+  --env APP_ENV=legacy-prod
 ```
 
 Jika build gagal menarik base image (`unauthorized`), buat pull secret untuk registry kelas lalu link ke `builder`:

@@ -2,6 +2,14 @@
 
 Jalankan script prep soal yang mau dikerjakan dari folder `prep/`, lalu kerjakan tanpa membuka [`KUNCI.md`](KUNCI.md).
 
+Sekali saja sebelum mulai, simpan kredensial Git lab di workstation:
+
+```bash
+git config --global credential.helper store
+echo "https://developer:d3v3lop3r@git.ocp4.example.com" > ~/.git-credentials
+chmod 600 ~/.git-credentials
+```
+
 ## Soal 1 — S2I Node.js: JSON error dan module not found
 
 Persiapan: `bash prep/prep-q1.sh`
