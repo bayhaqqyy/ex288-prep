@@ -66,11 +66,22 @@ wait_ns_gone() {
   return 0
 }
 
+# force_empty_ns <nama>: matikan Pod tanpa grace period dan hapus isi project
+# lebih dulu, supaya penghapusan namespace tidak menunggu ~30s per Pod.
+force_empty_ns() {
+  local p="$1" t
+  oc delete pods --all -n "$p" --grace-period=0 --force --wait=false >/dev/null 2>&1 || true
+  for t in all pvc pipelinerun taskrun; do
+    oc delete "$t" --all -n "$p" --grace-period=0 --wait=false >/dev/null 2>&1 || true
+  done
+}
+
 # reset_project <nama>: hapus project lama (kalau ada), tunggu hilang, buat baru
 reset_project() {
   local p="$1"
   if ns_exists "$p"; then
-    log "Menghapus project lama $p ..."
+    log "Menghapus project lama $p (force) ..."
+    force_empty_ns "$p"
     oc delete project "$p" --wait=false >/dev/null 2>&1 \
       || { [ "$ADMIN_OK" -eq 1 ] && KUBECONFIG="$ADMIN_KC" oc delete namespace "$p" --wait=false >/dev/null 2>&1; } \
       || true

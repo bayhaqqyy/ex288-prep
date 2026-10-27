@@ -84,6 +84,11 @@ ns_exists() {
 # Hapus project (tanpa menunggu satu per satu)
 for p in $ALL_PROJECTS; do
   if ns_exists "$p"; then
+    # Force: matikan Pod tanpa grace period dan hapus isinya dulu
+    oc delete pods --all -n "$p" --grace-period=0 --force --wait=false >/dev/null 2>&1 || true
+    for t in all pvc pipelinerun taskrun; do
+      oc delete "$t" --all -n "$p" --grace-period=0 --wait=false >/dev/null 2>&1 || true
+    done
     if oc delete project "$p" --wait=false >/dev/null 2>&1 \
        || { [ "$ADMIN_OK" -eq 1 ] && KUBECONFIG="$ADMIN_KC" oc delete namespace "$p" --wait=false >/dev/null 2>&1; }; then
       echo "  ${G}hapus${N} project $p"
@@ -125,7 +130,7 @@ if [ "$EXTRA" -eq 1 ]; then
 fi
 
 echo
-echo "Menunggu semua project benar-benar terhapus (bisa 1-5 menit)..."
+echo "Menunggu semua project benar-benar terhapus (biasanya < 1 menit setelah force)..."
 t=0; left=""
 while :; do
   left=""
