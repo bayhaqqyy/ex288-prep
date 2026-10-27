@@ -74,6 +74,8 @@ Di workstation lab, sebagai user `student`:
     bash prep/cleanup.sh --all-extra   # + clone lokal repo latihan, image podman, default route registry off
     ```
 
+    Cleanup mematikan Pod tanpa grace period, menghapus isi project, lalu menghapus project. Kalau setelah 10 detik masih Terminating, finalizer semua objek dilepas dan namespace di-finalize paksa sebagai admin, jadi tidak ada lagi yang stuck. Kalau mau mode hati-hati (tanpa lepas finalizer paksa), tambahkan `--safe`.
+
     Repo di GitLab lab tidak dihapus karena butuh token API. Prep berikutnya menimpa isinya, jadi aman dibiarkan.
 
 Kalau `oc new-app` menampilkan `warning: Cannot check if git requires authentication` lalu `none of the arguments provided could be classified as a source code location`, berarti langkah 1 belum jalan. Ulangi langkah 1, lalu coba lagi.

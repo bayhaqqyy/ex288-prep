@@ -49,6 +49,22 @@ ns_exists() {
   fi
 }
 
+# finalize_if_stuck <nama>: kalau isi namespace sudah kosong tapi tertahan
+# NamespaceDeletionDiscoveryFailure (ada APIService cluster yang down),
+# selesaikan penghapusan lewat subresource finalize. Hanya untuk kondisi itu.
+finalize_if_stuck() {
+  local p="$1" conds
+  [ "$ADMIN_OK" -eq 1 ] || return 1
+  conds="$(KUBECONFIG="$ADMIN_KC" oc get namespace "$p" \
+    -o jsonpath='{range .status.conditions[*]}{.type}={.status}{"\n"}{end}' 2>/dev/null)" || return 1
+  echo "$conds" | grep -q '^NamespaceDeletionDiscoveryFailure=True$' || return 1
+  echo "$conds" | grep -q '^NamespaceContentRemaining=False$' || return 1
+  echo "$conds" | grep -q '^NamespaceFinalizersRemaining=False$' || return 1
+  KUBECONFIG="$ADMIN_KC" oc get namespace "$p" -o json 2>/dev/null \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); d["spec"]["finalizers"]=[]; print(json.dumps(d))' \
+    | KUBECONFIG="$ADMIN_KC" oc replace --raw "/api/v1/namespaces/$p/finalize" -f - >/dev/null 2>&1
+}
+
 # wait_ns_gone <nama> [detik]: tunggu sampai namespace benar-benar hilang
 wait_ns_gone() {
   local p="$1" max="${2:-420}" t=0
@@ -60,6 +76,9 @@ wait_ns_gone() {
     fi
     [ "$t" -eq 0 ] && printf '\033[1;34m[prep]\033[0m Menunggu project %s selesai terhapus ' "$p"
     printf '.'
+    if [ "$t" -ge 15 ] && finalize_if_stuck "$p"; then
+      printf ' (isi sudah kosong, API cluster down -> finalize)'
+    fi
     sleep 5; t=$((t + 5))
   done
   [ "$t" -gt 0 ] && echo " hilang (${t}s)"
