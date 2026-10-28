@@ -189,7 +189,7 @@ Deployment ikut terupdate karena `oc new-app` dari image stream memasang image t
 
 ## Kunci Soal 5
 
-Jebakan: `oc set env --from=configmap/...` membuat entri `env` satu per satu (bukan `envFrom`), jadi key baru tidak otomatis ikut. `oc set env --from=secret/...` akan menamai variabel `DATABASE_PASSWORD`, bukan `DB_PASSWORD`. Pakai `envFrom` untuk ConfigMap dan `secretKeyRef` untuk password.
+Jebakan: `oc set env --from=configmap/...` membuat entri `env` satu per satu (bukan `envFrom`), jadi key baru tidak otomatis ikut. `oc set env --from=secret/...` akan menamai variabel `DATABASE_PASSWORD`, bukan `DB_PASSWORD`. Pakai `envFrom` untuk ConfigMap, `secretKeyRef` untuk password, dan `fieldRef: metadata.name` untuk `POD_NAME`.
 
 ```bash
 oc project inventory
@@ -203,18 +203,42 @@ oc create secret generic inventory-db-secret --from-literal=database-password=In
 
 oc explain deployment.spec.template.spec.containers.envFrom
 oc explain deployment.spec.template.spec.containers.env.valueFrom.secretKeyRef
+oc explain deployment.spec.template.spec.containers.env.valueFrom.fieldRef
 
 oc patch deployment/inventory-api --type=json -p '[
   {"op":"add","path":"/spec/template/spec/containers/0/envFrom",
    "value":[{"configMapRef":{"name":"inventory-db-config"}}]},
   {"op":"add","path":"/spec/template/spec/containers/0/env",
-   "value":[{"name":"DB_PASSWORD","valueFrom":{"secretKeyRef":{"name":"inventory-db-secret","key":"database-password"}}}]}
+   "value":[{"name":"DB_PASSWORD","valueFrom":{"secretKeyRef":{"name":"inventory-db-secret","key":"database-password"}}},
+            {"name":"POD_NAME","valueFrom":{"fieldRef":{"fieldPath":"metadata.name"}}}]}
 ]'
 oc rollout status deployment/inventory-api
 oc logs deploy/inventory-api --tail=2               # DB connection OK (inventory@inventory-db/inventorydb)
+
+POD=$(oc get pods -l app=inventory-api -o jsonpath='{.items[0].metadata.name}')
+oc exec "$POD" -- printenv POD_NAME                 # harus sama dengan $POD
+echo "$POD"
 ```
 
-Cara lain: `oc edit deployment/inventory-api` lalu tulis blok yang sama di bawah container. Bukti key baru tidak butuh edit Deployment:
+Bentuk YAML-nya kalau lewat `oc edit deployment/inventory-api` (cari contoh `valueFrom` di dokumentasi: Nodes → Working with containers):
+
+```yaml
+        envFrom:
+        - configMapRef:
+            name: inventory-db-config
+        env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: inventory-db-secret
+              key: database-password
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+```
+
+Bukti key baru tidak butuh edit Deployment:
 
 ```bash
 oc set data configmap/inventory-db-config DB_PORT=5432
@@ -451,6 +475,8 @@ tkn task describe git-clone -n openshift-pipelines
 tkn task describe buildah -n openshift-pipelines
 tkn task describe openshift-client -n openshift-pipelines
 ```
+
+Nilai yang dipakai: `GIT_URL=https://git.ocp4.example.com/developer/tekton-web.git`, `GIT_REVISION=main`, `IMAGE=image-registry.openshift-image-registry.svc:5000/pipeline-lab/tekton-web:latest`, `APP_NAME=tekton-web`.
 
 Kredensial Git untuk service account `pipeline`:
 

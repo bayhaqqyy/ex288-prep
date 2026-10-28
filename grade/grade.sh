@@ -229,15 +229,22 @@ q5_pwd() {
   jp_eq inventory deploy/inventory-api '{.spec.template.spec.containers[0].env[?(@.name=="DB_PASSWORD")].valueFrom.secretKeyRef.name}' inventory-db-secret &&
   jp_eq inventory deploy/inventory-api '{.spec.template.spec.containers[0].env[?(@.name=="DB_PASSWORD")].valueFrom.secretKeyRef.key}' database-password
 }
+q5_podname() {
+  local pod
+  jp_eq inventory deploy/inventory-api '{.spec.template.spec.containers[0].env[?(@.name=="POD_NAME")].valueFrom.fieldRef.fieldPath}' metadata.name || return 1
+  pod="$(oc get pods -n inventory -l app=inventory-api --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+  [ -n "$pod" ] && [ "$(oc exec -n inventory "$pod" -- printenv POD_NAME 2>/dev/null)" = "$pod" ]
+}
 q5_log() { oc logs -n inventory deploy/inventory-api --tail=3 2>/dev/null | tail -1 | grep -q 'DB connection OK'; }
 grade_q5() {
   local ns=inventory
-  check 5 6 "ConfigMap inventory-db-config berisi DB_HOST, DB_USER, DB_NAME yang benar" q5_cm
-  check 5 4 "Secret inventory-db-secret key database-password = Inv3nt0ry" q5_secret
-  check 5 6 "Deployment memakai envFrom configMapRef inventory-db-config" jp_has $ns deploy/inventory-api '{.spec.template.spec.containers[0].envFrom[*].configMapRef.name}' inventory-db-config
-  check 5 6 "Env DB_PASSWORD dari secretKeyRef inventory-db-secret/database-password" q5_pwd
+  check 5 5 "ConfigMap inventory-db-config berisi DB_HOST, DB_USER, DB_NAME yang benar" q5_cm
+  check 5 3 "Secret inventory-db-secret key database-password = Inv3nt0ry" q5_secret
+  check 5 5 "Deployment memakai envFrom configMapRef inventory-db-config" jp_has $ns deploy/inventory-api '{.spec.template.spec.containers[0].envFrom[*].configMapRef.name}' inventory-db-config
+  check 5 5 "Env DB_PASSWORD dari secretKeyRef inventory-db-secret/database-password" q5_pwd
+  check 5 5 "Env POD_NAME dari fieldRef metadata.name dan sama dengan nama Pod" q5_podname
   check 5 2 "Deployment inventory-api Ready" deploy_ready $ns inventory-api
-  check 5 6 "Log terakhir inventory-api: DB connection OK" q5_log
+  check 5 5 "Log terakhir inventory-api: DB connection OK" q5_log
 }
 
 # =================== SOAL 6 ===================
@@ -364,6 +371,12 @@ q9_gitsecret() {
   done
   return 1
 }
+q9_params() {
+  oc get pipelinerun -n pipeline-lab -o jsonpath='{range .items[*]}{.status.conditions[0].reason}|{range .spec.params[*]}{.name}={.value};{end}{"\n"}{end}' 2>/dev/null \
+    | grep -E '^(Succeeded|Completed)\|' \
+    | grep -F 'GIT_URL=https://git.ocp4.example.com/developer/tekton-web' \
+    | grep -qF 'GIT_REVISION=main;'
+}
 q9_run() {
   oc get pipelinerun -n pipeline-lab -o jsonpath='{range .items[*]}{.spec.pipelineRef.name} {.status.conditions[0].reason}{"\n"}{end}' 2>/dev/null \
     | grep -qE '^build-and-deploy (Succeeded|Completed)$'
@@ -374,7 +387,8 @@ grade_q9() {
   check 9 4 "Urutan task fetch-source -> build-image -> deploy" q9_order
   check 9 4 "Task diambil dari cluster resolver: git-clone, buildah, openshift-client" q9_refs
   check 9 3 "Git secret beranotasi tekton.dev/git-* ter-link ke SA pipeline" q9_gitsecret
-  check 9 6 "PipelineRun build-and-deploy Succeeded" q9_run
+  check 9 4 "PipelineRun build-and-deploy Succeeded" q9_run
+  check 9 2 "PipelineRun memakai GIT_URL tekton-web.git dan GIT_REVISION main" q9_params
   check 9 3 "ImageStreamTag tekton-web:latest ada" exists $ns istag/tekton-web:latest
   check 9 4 "Deployment tekton-web Ready dengan BUILT_BY=tekton" pod_env $ns tekton-web BUILT_BY tekton
   check 9 3 "Route tekton-web merespons 200" http_code "http://tekton-web-pipeline-lab.$APPS/" 200

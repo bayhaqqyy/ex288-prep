@@ -22,13 +22,15 @@ export GIT_TERMINAL_PROMPT=0
 log()  { echo -e "\n\033[1;34m[prep]\033[0m $*"; }
 warn() { echo -e "\033[1;33m[warn]\033[0m $*"; }
 
-login_dev() {
-  oc login -u "${OCP_USER}" -p "${OCP_PASS}" "${OCP_API}" >/dev/null
+# oc login tanpa pernah menunggu input (prep-all menjalankan script dengan
+# stdin kosong). Kalau CA cluster belum dipercaya, ulangi dengan insecure.
+oc_login() {
+  oc login -u "$1" -p "$2" "${OCP_API}" </dev/null >/dev/null 2>&1 \
+    || oc login -u "$1" -p "$2" "${OCP_API}" --insecure-skip-tls-verify=true </dev/null >/dev/null
 }
 
-login_admin() {
-  oc login -u "${OCP_ADMIN}" -p "${OCP_ADMIN_PASS}" "${OCP_API}" >/dev/null
-}
+login_dev()   { oc_login "${OCP_USER}" "${OCP_PASS}"; }
+login_admin() { oc_login "${OCP_ADMIN}" "${OCP_ADMIN_PASS}"; }
 
 # Cek namespace pakai admin di kubeconfig terpisah: developer tidak bisa
 # melihat project yang sedang Terminating, jadi tanpa ini project dianggap
@@ -36,8 +38,7 @@ login_admin() {
 ADMIN_KC="$(mktemp)"
 trap 'rm -f "$ADMIN_KC"' EXIT
 ADMIN_OK=0
-if KUBECONFIG="$ADMIN_KC" oc login -u "${OCP_ADMIN}" -p "${OCP_ADMIN_PASS}" "${OCP_API}" >/dev/null 2>&1 \
-   || KUBECONFIG="$ADMIN_KC" oc login -u "${OCP_ADMIN}" -p "${OCP_ADMIN_PASS}" "${OCP_API}" --insecure-skip-tls-verify=true >/dev/null 2>&1; then
+if KUBECONFIG="$ADMIN_KC" oc_login "${OCP_ADMIN}" "${OCP_ADMIN_PASS}" 2>/dev/null; then
   ADMIN_OK=1
 fi
 

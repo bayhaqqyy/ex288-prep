@@ -67,6 +67,7 @@ Persiapan: `bash prep/prep-q5.sh` → membuat database `inventory-db` dan backen
 - Semua key ConfigMap masuk ke Deployment `inventory-api` sebagai environment variable dengan nama yang sama.
 - Password dari Secret masuk ke `inventory-api` sebagai env `DB_PASSWORD` (bukan `DATABASE_PASSWORD`).
 - Penambahan key baru ke ConfigMap di masa depan tidak boleh butuh edit Deployment lagi.
+- Expose nama Pod `inventory-api` sebagai environment variable `POD_NAME`. Nilainya harus sama dengan nama Pod yang sedang berjalan.
 - Log `oc logs deploy/inventory-api` harus menampilkan `DB connection OK`.
 
 ## Soal 6 — Template untuk build dan deploy
@@ -159,13 +160,26 @@ Probe lama yang salah tidak boleh tersisa. Pod harus `1/1 Running` dan route `he
 
 Persiapan: `bash prep/prep-q9.sh` → repo `tekton-web` dan skeleton `/home/student/ex288-set2/q9/pipeline-skeleton.yaml`
 
-- Project: `pipeline-lab`.
-- Buat Pipeline `build-and-deploy` dari skeleton dengan tiga task berurutan: `fetch-source` (git-clone), `build-image` (buildah), `deploy` (openshift-client). Semua task diambil dari namespace `openshift-pipelines` lewat cluster resolver.
-- `build-image` mem-build `Containerfile` dan push ke `image-registry.openshift-image-registry.svc:5000/pipeline-lab/tekton-web:latest`.
+Semua dikerjakan di project `pipeline-lab`. Gunakan nilai-nilai ini persis seperti tertulis:
+
+| Item | Nilai |
+| --- | --- |
+| Git repository (`GIT_URL`) | `https://git.ocp4.example.com/developer/tekton-web.git` |
+| Git revision (`GIT_REVISION`) | `main` |
+| Kredensial Git | `developer` / `d3v3lop3r` |
+| File build | `Containerfile` di root repo |
+| Image hasil build (`IMAGE`) | `image-registry.openshift-image-registry.svc:5000/pipeline-lab/tekton-web:latest` |
+| Nama aplikasi (`APP_NAME`) | `tekton-web` |
+| Service account | `pipeline` |
+| Namespace task | `openshift-pipelines` (cluster resolver) |
+
+- Buat Pipeline `build-and-deploy` dari skeleton dengan tiga task berurutan: `fetch-source` (git-clone), `build-image` (buildah), `deploy` (openshift-client).
+- `fetch-source` meng-clone `GIT_URL` pada `GIT_REVISION` di atas.
+- `build-image` mem-build `Containerfile` dan push ke alamat image di tabel.
 - `deploy` membuat Deployment, Service, dan Route `tekton-web` jika belum ada. Jika sudah ada, task ini me-restart rollout.
 - Repo Git private: kredensial disimpan sebagai secret dan dipakai service account `pipeline`.
 - Workspace memakai PVC 1Gi dari volumeClaimTemplate.
-- Jalankan PipelineRun sampai `Succeeded`. Pod `tekton-web` harus Running dengan env `BUILT_BY=tekton`.
+- Jalankan PipelineRun dengan parameter `GIT_URL`, `GIT_REVISION`, `IMAGE`, dan `APP_NAME` sesuai tabel sampai `Succeeded`. Pod `tekton-web` harus Running dengan env `BUILT_BY=tekton`.
 
 ## Soal 10 — Expose internal registry dan push image
 
