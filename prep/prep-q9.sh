@@ -180,6 +180,8 @@ for t in git-clone buildah openshift-client; do
   oc get task "$t" -n openshift-pipelines >/dev/null 2>&1 \
     || warn "Task $t tidak terlihat di namespace openshift-pipelines (cek: oc get tasks -n openshift-pipelines)"
 done
+oc api-resources --api-group=triggers.tekton.dev 2>/dev/null | grep -q eventlisteners \
+  || warn "CRD Tekton Triggers (EventListener) tidak terdeteksi. Bagian trigger Soal 9 butuh operator OpenShift Pipelines lengkap."
 reset_project pipeline-lab
 
 # Repo aplikasi

@@ -582,6 +582,102 @@ curl tekton-web-pipeline-lab.apps.ocp4.example.com
 
 Jika `build-image` gagal menarik base image (`unauthorized`), buat secret `docker-registry` untuk `registry.ocp4.example.com:8443` lalu `oc secrets link pipeline <secret>`, kemudian jalankan PipelineRun baru.
 
+### Trigger dan EventListener
+
+Simpan sebagai `triggers.yaml`:
+
+```yaml
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: tekton-web-binding
+spec:
+  params:
+  - name: git-url
+    value: $(body.git_url)
+  - name: git-revision
+    value: $(body.revision)
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: tekton-web-template
+spec:
+  params:
+  - name: git-url
+  - name: git-revision
+    default: main
+  resourcetemplates:
+  - apiVersion: tekton.dev/v1
+    kind: PipelineRun
+    metadata:
+      generateName: build-and-deploy-run-
+    spec:
+      pipelineRef:
+        name: build-and-deploy
+      taskRunTemplate:
+        serviceAccountName: pipeline
+      params:
+      - name: GIT_URL
+        value: $(tt.params.git-url)
+      - name: GIT_REVISION
+        value: $(tt.params.git-revision)
+      - name: IMAGE
+        value: image-registry.openshift-image-registry.svc:5000/pipeline-lab/tekton-web:latest
+      - name: APP_NAME
+        value: tekton-web
+      workspaces:
+      - name: shared-workspace
+        volumeClaimTemplate:
+          spec:
+            accessModes:
+            - ReadWriteOnce
+            resources:
+              requests:
+                storage: 1Gi
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: tekton-web-listener
+spec:
+  serviceAccountName: pipeline
+  triggers:
+  - name: tekton-web-trigger
+    bindings:
+    - ref: tekton-web-binding
+    template:
+      ref: tekton-web-template
+```
+
+```bash
+oc apply -f triggers.yaml
+oc get triggerbinding,triggertemplate,eventlistener
+oc get pods -l eventlistener=tekton-web-listener      # pod el-tekton-web-listener-xxx Running
+oc get eventlistener tekton-web-listener \
+  -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{"\n"}'   # True
+
+oc expose service el-tekton-web-listener
+EL=$(oc get route el-tekton-web-listener -o jsonpath='{.spec.host}')
+
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"git_url":"https://git.ocp4.example.com/developer/tekton-web.git","revision":"main"}' \
+  "http://$EL"                                          # balasan berisi eventID
+
+tkn pipelinerun list                                  # muncul run baru
+oc get pipelinerun -l triggers.tekton.dev/eventlistener=tekton-web-listener
+tkn pipelinerun logs -f --last
+```
+
+Penting: `$(tt.params.<nama>)` dipakai di dalam TriggerTemplate, bukan `$(params.<nama>)`. Nama service EventListener selalu diawali `el-`.
+
+Kalau pod EventListener `CrashLoopBackOff` karena hak akses (`forbidden`), service account belum punya role triggers. Minta admin menambahkan:
+
+```bash
+oc policy add-role-to-user tekton-triggers-eventlistener-roles -z pipeline -n pipeline-lab
+oc adm policy add-cluster-role-to-user tekton-triggers-eventlistener-clusterroles -z pipeline -n pipeline-lab
+```
+
 ## Kunci Soal 10
 
 ```bash

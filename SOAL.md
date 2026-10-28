@@ -181,6 +181,20 @@ Semua dikerjakan di project `pipeline-lab`. Gunakan nilai-nilai ini persis seper
 - Workspace memakai PVC 1Gi dari volumeClaimTemplate.
 - Jalankan PipelineRun dengan parameter `GIT_URL`, `GIT_REVISION`, `IMAGE`, dan `APP_NAME` sesuai tabel sampai `Succeeded`. Pod `tekton-web` harus Running dengan env `BUILT_BY=tekton`.
 
+**Trigger dan EventListener** (Tekton Triggers):
+
+| Item | Nilai |
+| --- | --- |
+| TriggerBinding | `tekton-web-binding`, param `git-url` dari `$(body.git_url)` dan `git-revision` dari `$(body.revision)` |
+| TriggerTemplate | `tekton-web-template`, param `git-url` dan `git-revision` (default `main`) |
+| EventListener | `tekton-web-listener`, service account `pipeline`, memakai binding dan template di atas |
+| Route EventListener | hostname default dari service `el-tekton-web-listener` |
+| Payload event | `{"git_url": "https://git.ocp4.example.com/developer/tekton-web.git", "revision": "main"}` |
+
+- TriggerTemplate membuat PipelineRun `build-and-deploy` dengan `GIT_URL` dan `GIT_REVISION` dari param trigger, sedangkan `IMAGE`, `APP_NAME`, service account, dan workspace mengikuti tabel pertama.
+- Expose EventListener lewat route supaya bisa dipanggil dari luar cluster.
+- Kirim payload di atas ke route EventListener dengan HTTP POST. Event itu harus membuat PipelineRun baru yang berakhir `Succeeded`.
+
 ## Soal 10 — Expose internal registry dan push image
 
 Persiapan: `bash prep/prep-q10.sh` → default route registry dimatikan, Containerfile di `/home/student/ex288-set2/q10/`.

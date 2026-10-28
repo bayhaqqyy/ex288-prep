@@ -381,17 +381,46 @@ q9_run() {
   oc get pipelinerun -n pipeline-lab -o jsonpath='{range .items[*]}{.spec.pipelineRef.name} {.status.conditions[0].reason}{"\n"}{end}' 2>/dev/null \
     | grep -qE '^build-and-deploy (Succeeded|Completed)$'
 }
+q9_tb() {
+  local names
+  names="$(jp pipeline-lab triggerbinding/tekton-web-binding '{.spec.params[*].name}')"
+  echo " $names " | grep -q ' git-url ' && echo " $names " | grep -q ' git-revision ' &&
+  jp_has pipeline-lab triggerbinding/tekton-web-binding '{.spec.params[?(@.name=="git-url")].value}' 'body.git_url' &&
+  jp_has pipeline-lab triggerbinding/tekton-web-binding '{.spec.params[?(@.name=="git-revision")].value}' 'body.revision'
+}
+q9_tt() {
+  jp_eq pipeline-lab triggertemplate/tekton-web-template '{.spec.resourcetemplates[0].spec.pipelineRef.name}' build-and-deploy &&
+  jp_has pipeline-lab triggertemplate/tekton-web-template '{.spec.resourcetemplates[0].spec.params[?(@.name=="GIT_URL")].value}' 'tt.params.git-url'
+}
+q9_el() {
+  jp_eq pipeline-lab eventlistener/tekton-web-listener '{.spec.serviceAccountName}' pipeline &&
+  jp_has pipeline-lab eventlistener/tekton-web-listener '{.spec.triggers[*].bindings[*].ref}' tekton-web-binding &&
+  jp_has pipeline-lab eventlistener/tekton-web-listener '{.spec.triggers[*].template.ref}' tekton-web-template &&
+  jp_eq pipeline-lab eventlistener/tekton-web-listener '{.status.conditions[?(@.type=="Ready")].status}' True
+}
+q9_el_route() {
+  oc get route -n pipeline-lab -o jsonpath='{.items[*].spec.to.name}' 2>/dev/null | tr ' ' '\n' | grep -qx el-tekton-web-listener
+}
+q9_triggered() {
+  oc get pipelinerun -n pipeline-lab -l triggers.tekton.dev/eventlistener=tekton-web-listener \
+    -o jsonpath='{range .items[*]}{.status.conditions[0].reason}{"\n"}{end}' 2>/dev/null | grep -qE '^(Succeeded|Completed)$'
+}
 grade_q9() {
   local ns=pipeline-lab
-  check 9 3 "Pipeline build-and-deploy ada" exists $ns pipeline/build-and-deploy
-  check 9 4 "Urutan task fetch-source -> build-image -> deploy" q9_order
-  check 9 4 "Task diambil dari cluster resolver: git-clone, buildah, openshift-client" q9_refs
-  check 9 3 "Git secret beranotasi tekton.dev/git-* ter-link ke SA pipeline" q9_gitsecret
-  check 9 4 "PipelineRun build-and-deploy Succeeded" q9_run
+  check 9 2 "Pipeline build-and-deploy ada" exists $ns pipeline/build-and-deploy
+  check 9 3 "Urutan task fetch-source -> build-image -> deploy" q9_order
+  check 9 3 "Task diambil dari cluster resolver: git-clone, buildah, openshift-client" q9_refs
+  check 9 2 "Git secret beranotasi tekton.dev/git-* ter-link ke SA pipeline" q9_gitsecret
+  check 9 3 "PipelineRun build-and-deploy Succeeded" q9_run
   check 9 2 "PipelineRun memakai GIT_URL tekton-web.git dan GIT_REVISION main" q9_params
-  check 9 3 "ImageStreamTag tekton-web:latest ada" exists $ns istag/tekton-web:latest
-  check 9 4 "Deployment tekton-web Ready dengan BUILT_BY=tekton" pod_env $ns tekton-web BUILT_BY tekton
-  check 9 3 "Route tekton-web merespons 200" http_code "http://tekton-web-pipeline-lab.$APPS/" 200
+  check 9 2 "ImageStreamTag tekton-web:latest ada" exists $ns istag/tekton-web:latest
+  check 9 3 "Deployment tekton-web Ready dengan BUILT_BY=tekton" pod_env $ns tekton-web BUILT_BY tekton
+  check 9 2 "Route tekton-web merespons 200" http_code "http://tekton-web-pipeline-lab.$APPS/" 200
+  check 9 2 "[trigger] TriggerBinding tekton-web-binding: git-url dan git-revision dari body" q9_tb
+  check 9 2 "[trigger] TriggerTemplate tekton-web-template membuat PipelineRun build-and-deploy" q9_tt
+  check 9 2 "[trigger] EventListener tekton-web-listener Ready, SA pipeline, pakai binding+template" q9_el
+  check 9 1 "[trigger] Route ke service el-tekton-web-listener ada" q9_el_route
+  check 9 1 "[trigger] PipelineRun dari EventListener Succeeded" q9_triggered
 }
 
 # =================== SOAL 10 ===================
