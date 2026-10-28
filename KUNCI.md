@@ -488,6 +488,17 @@ oc annotate secret tekton-git tekton.dev/git-0=https://git.ocp4.example.com
 oc secrets link pipeline tekton-git
 ```
 
+Kalau `fetch-source` gagal dengan `cp: can't stat '/workspace/basic-auth/.git-credentials'`, berarti kamu mem-bind workspace `basic-auth` ke secret bertipe `kubernetes.io/basic-auth`. Workspace itu harus berisi file `.git-credentials` dan `.gitconfig`. Pilih salah satu:
+
+- Lepas binding `basic-auth` dan pakai secret beranotasi `tekton.dev/git-0` yang di-link ke SA `pipeline` seperti di atas (cara kunci ini).
+- Atau buat secret khusus untuk workspace itu, lalu bind sebagai `basic-auth` di task `fetch-source` dan sebagai `secret.secretName` di PipelineRun atau TriggerTemplate:
+
+```bash
+oc create secret generic tekton-git-basic-auth \
+  --from-literal=.git-credentials='https://developer:d3v3lop3r@git.ocp4.example.com' \
+  --from-literal=.gitconfig=$'[credential "https://git.ocp4.example.com"]\n\thelper = store\n'
+```
+
 Tambahkan dua task ini ke skeleton, di bawah `fetch-source`:
 
 ```yaml
