@@ -199,6 +199,13 @@ All work is done in the project `pipeline-lab`. Use these values exactly as writ
 
 Preparation: `bash prep/prep-q10.sh` → the registry default route is disabled, and the Containerfile is in `/home/student/ex288-set2/q10/`.
 
+Credentials:
+
+| Registry | Username | Password |
+| --- | --- | --- |
+| Classroom registry `registry.ocp4.example.com:8443` (base image in `FROM`) | `admin` | `redhatocp` |
+| OpenShift internal registry (default route) | your OpenShift user (`developer`) | your OpenShift token (`oc whoami -t`) |
+
 - As `admin`, expose the OpenShift internal image registry through its default route.
 - As `developer`, build an image named `custom-nginx:1.0` from that Containerfile using podman.
 - Push the image to the `registry-lab` project in the internal registry through that route.
