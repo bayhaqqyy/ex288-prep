@@ -1,8 +1,8 @@
-# EX288 Prep — Soal
+# EX288 Prep — Questions
 
-Jalankan script prep soal yang mau dikerjakan dari folder `prep/`, lalu kerjakan tanpa membuka [`KUNCI.md`](KUNCI.md).
+Run the prep script for the question you want to practice from the `prep/` folder, then solve it without opening [`KUNCI.md`](KUNCI.md).
 
-Sekali saja sebelum mulai, simpan kredensial Git lab di workstation:
+Once, before you start, store the lab Git credentials on the workstation:
 
 ```bash
 git config --global credential.helper store
@@ -10,198 +10,198 @@ echo "https://developer:d3v3lop3r@git.ocp4.example.com" > ~/.git-credentials
 chmod 600 ~/.git-credentials
 ```
 
-## Soal 1 — S2I Node.js: JSON error dan module not found
+## Question 1 — S2I Node.js: JSON error and module not found
 
-Persiapan: `bash prep/prep-q1.sh`
+Preparation: `bash prep/prep-q1.sh`
 
-- Build dan deploy aplikasi dari `https://git.ocp4.example.com/developer/metrics-api.git`, branch `release-v1`, subdirektori `apps/metrics`.
-- Project: `metrics-prod`. Semua resource bernama `metrics-api`.
-- Gunakan image stream tag `nodejs:18-ubi9` dari namespace `openshift`.
-- Dependency npm diambil dari `http://nexus-infra.apps.ocp4.example.com/repository/npm`.
-- Kredensial Git (`developer` / `d3v3lop3r`) disimpan sebagai secret dan dipakai oleh proses build.
-- Aplikasi harus berjalan tanpa error dan bisa diakses lewat `http://metrics-api-metrics-prod.apps.ocp4.example.com` dan `https://metrics-api-metrics-prod.apps.ocp4.example.com`.
-- Endpoint `/metrics` harus mengembalikan metrik Prometheus.
+- Build and deploy the application from `https://git.ocp4.example.com/developer/metrics-api.git`, branch `release-v1`, subdirectory `apps/metrics`.
+- The application must be deployed to the project `metrics-prod`. All resources must be named `metrics-api`.
+- The application must be based on the image stream tag `nodejs:18-ubi9` from the `openshift` namespace.
+- The application's npm dependencies are available at `http://nexus-infra.apps.ocp4.example.com/repository/npm`.
+- The Git server requires authentication (`developer` / `d3v3lop3r`). The credentials must be stored as a secret and made available to the build process.
+- The application must run without errors and be accessible at both `http://metrics-api-metrics-prod.apps.ocp4.example.com` and `https://metrics-api-metrics-prod.apps.ocp4.example.com`.
+- The `/metrics` endpoint must return Prometheus metrics.
 
-Hint: perbaikan kode harus di-push ke Git. Jangan menambal file langsung di Pod.
+Hint: any source code fix must be pushed to Git. Do not patch files directly inside the Pod.
 
-## Soal 2 — Docker build dari base image dan env Nexus
+## Question 2 — Docker build from a base image with Nexus environment
 
-Persiapan: `bash prep/prep-q2.sh` (opsional: `BASE_IMAGE=<image> bash prep/prep-q2.sh`)
+Preparation: `bash prep/prep-q2.sh` (optional: `BASE_IMAGE=<image> bash prep/prep-q2.sh`)
 
-- Build dan deploy aplikasi dari `https://git.ocp4.example.com/developer/legacy-web.git`, branch `main`, subdirektori `apps/legacy`.
-- Project: `legacy-prod`. Semua resource bernama `legacy-web`.
-- Build wajib memakai Dockerfile yang ada di repo (Docker strategy).
-- Selama build, npm harus memakai registry Nexus lewat environment variable `npm_config_registry`.
-- Saat runtime, container harus punya env `APP_ENV=legacy-prod`.
-- Image harus kompatibel dengan OpenShift: tidak berjalan sebagai root, listen di port 8080.
-- Aplikasi bisa diakses di hostname default route dan menampilkan `legacy-web running in mode: legacy-prod`.
+- Build and deploy the application from `https://git.ocp4.example.com/developer/legacy-web.git`, branch `main`, subdirectory `apps/legacy`.
+- The application must be deployed to the project `legacy-prod`. All resources must be named `legacy-web`.
+- The build must use the Dockerfile provided in the repository (Docker strategy).
+- During the build, npm must use the Nexus registry through the `npm_config_registry` environment variable.
+- At runtime, the container must have the environment variable `APP_ENV=legacy-prod`.
+- The image must be OpenShift compatible: it must not run as root and must listen on port 8080.
+- The application must be accessible on the default route hostname and return `legacy-web running in mode: legacy-prod`.
 
-## Soal 3 — S2I httpd: SERVER_PORT 8081 lewat S2I script
+## Question 3 — S2I httpd: SERVER_PORT 8081 through the S2I script
 
-Persiapan: `bash prep/prep-q3.sh`
+Preparation: `bash prep/prep-q3.sh`
 
-- Build dan deploy dari `https://git.ocp4.example.com/developer/portal-s2i.git`, branch `main`, subdirektori `site`.
-- Project: `deploy-portal`. Semua resource bernama `portal-web`.
-- Builder: `httpd:2.4-ubi9` dari namespace `openshift`.
-- Build harus memodifikasi S2I script yang sudah ada di repo agar environment variable `SERVER_PORT` bernilai `8081`. Tidak boleh lewat `--build-env` atau `oc set env`.
-- Kredensial Git disimpan sebagai secret dan dipakai build.
-- Aplikasi bisa diakses lewat `http://portal.apps.ocp4.example.com` dan `https://portal.apps.ocp4.example.com`.
+- Build and deploy the application from `https://git.ocp4.example.com/developer/portal-s2i.git`, branch `main`, subdirectory `site`.
+- The application must be deployed to the project `deploy-portal`. All resources must be named `portal-web`.
+- The application must use the `httpd:2.4-ubi9` builder image from the `openshift` namespace.
+- The build must modify the existing S2I scripts in the repository so that the `SERVER_PORT` environment variable is set to `8081`. Do not use `--build-env` or `oc set env`.
+- The Git credentials must be stored as a secret and used by the build.
+- The application must be accessible at both `http://portal.apps.ocp4.example.com` and `https://portal.apps.ocp4.example.com`.
 
-## Soal 4 — httpd Docker build dengan binary tar
+## Question 4 — httpd Docker build from a binary tar
 
-Persiapan: `bash prep/prep-q4.sh` → menghasilkan `/home/student/ex288-set2/q4/docs-site-v1.tar` dan `docs-site-v2.tar`
+Preparation: `bash prep/prep-q4.sh` → creates `/home/student/ex288-set2/q4/docs-site-v1.tar` and `docs-site-v2.tar`
 
-- Project: `deploy-docs`. Semua resource bernama `docs-site`.
-- Buat BuildConfig Docker strategy dengan source tipe **Binary**. Isi build berasal dari file `docs-site-v1.tar`.
-- Build harus memakai image stream tag `httpd:2.4-ubi9` dari namespace `openshift` sebagai base image.
-- Deploy hasil build dan expose di hostname default. `curl` harus menampilkan `EX288 Docs Site v1`.
-- Lanjutan: jalankan build baru dari `docs-site-v2.tar` tanpa membuat BuildConfig baru. Deployment harus ikut terupdate dan menampilkan `EX288 Docs Site v2`.
+- The application must be deployed to the project `deploy-docs`. All resources must be named `docs-site`.
+- Create a Docker strategy BuildConfig with a **Binary** source. The build input is the file `docs-site-v1.tar`.
+- The build must use the image stream tag `httpd:2.4-ubi9` from the `openshift` namespace as its base image.
+- Deploy the built image and expose it on the default hostname. `curl` must return `EX288 Docs Site v1`.
+- Then start a new build from `docs-site-v2.tar` without creating a new BuildConfig. The deployment must update automatically and return `EX288 Docs Site v2`.
 
-## Soal 5 — ConfigMap dan Secret untuk backend PostgreSQL
+## Question 5 — ConfigMap and Secret for a PostgreSQL backend
 
-Persiapan: `bash prep/prep-q5.sh` → membuat database `inventory-db` dan backend `inventory-api` yang belum bisa konek.
+Preparation: `bash prep/prep-q5.sh` → creates the `inventory-db` database and an `inventory-api` backend that cannot connect yet.
 
-- Project: `inventory`.
-- Buat ConfigMap `inventory-db-config` berisi `DB_HOST=inventory-db`, `DB_USER=inventory`, `DB_NAME=inventorydb`.
-- Buat Secret `inventory-db-secret` dengan key `database-password` bernilai `Inv3nt0ry`.
-- Semua key ConfigMap masuk ke Deployment `inventory-api` sebagai environment variable dengan nama yang sama.
-- Password dari Secret masuk ke `inventory-api` sebagai env `DB_PASSWORD` (bukan `DATABASE_PASSWORD`).
-- Penambahan key baru ke ConfigMap di masa depan tidak boleh butuh edit Deployment lagi.
-- Expose nama Pod `inventory-api` sebagai environment variable `POD_NAME`. Nilainya harus sama dengan nama Pod yang sedang berjalan.
-- Log `oc logs deploy/inventory-api` harus menampilkan `DB connection OK`.
+- Work in the project `inventory`.
+- Create a ConfigMap `inventory-db-config` containing `DB_HOST=inventory-db`, `DB_USER=inventory`, and `DB_NAME=inventorydb`.
+- Create a Secret `inventory-db-secret` with the key `database-password` set to `Inv3nt0ry`.
+- All ConfigMap keys must be exposed to the `inventory-api` Deployment as environment variables with the same names.
+- The password from the Secret must be exposed to `inventory-api` as the environment variable `DB_PASSWORD` (not `DATABASE_PASSWORD`).
+- Adding new keys to the ConfigMap in the future must not require reconfiguring the Deployment.
+- Expose the `inventory-api` Pod name as the environment variable `POD_NAME`. Its value must match the name of the running Pod.
+- `oc logs deploy/inventory-api` must show `DB connection OK`.
 
-## Soal 6 — Template untuk build dan deploy
+## Question 6 — Templates for build and deployment
 
-Persiapan: `bash prep/prep-q6.sh`
+Preparation: `bash prep/prep-q6.sh`
 
-Semua dikerjakan di project `lion`. Gunakan nilai-nilai ini persis seperti tertulis:
+All work is done in the project `lion`. Use these values exactly as written:
 
-| Item | Nilai |
+| Item | Value |
 | --- | --- |
 | Git repository | `https://git.ocp4.example.com/developer/shop-ui.git` |
 | Branch | `v2` |
-| Context dir aplikasi | `app` |
-| Build template | `templates/shop-build.yaml` di repo tersebut |
-| Deploy template | `templates/shop-deploy.yaml` di repo tersebut |
-| Kredensial Git | `developer` / `d3v3lop3r` |
+| Application context directory | `app` |
+| Build template | `templates/shop-build.yaml` in that repository |
+| Deployment template | `templates/shop-deploy.yaml` in that repository |
+| Git credentials | `developer` / `d3v3lop3r` |
 | NPM registry | `http://nexus-infra.apps.ocp4.example.com/repository/npm` |
 | Container image registry (`REGISTRY_URL`) | `image-registry.openshift-image-registry.svc:5000` |
-| Namespace image di registry | `lion` |
-| Image hasil build | `image-registry.openshift-image-registry.svc:5000/lion/shop-ui:latest` |
+| Image namespace in the registry | `lion` |
+| Built image | `image-registry.openshift-image-registry.svc:5000/lion/shop-ui:latest` |
 | Backend URL | `https://shop-api-lion.apps.ocp4.example.com/` |
-| Hostname frontend | `shop-ui-lion.apps.ocp4.example.com` |
+| Frontend hostname | `shop-ui-lion.apps.ocp4.example.com` |
 
 Build template:
 
-- Template sudah memakai `${REGISTRY_URL}` di output build, tapi parameternya belum ada. Tambahkan parameter wajib `REGISTRY_URL` dengan deskripsi `My shop image registry`.
-- Tambahkan parameter wajib `GIT_SECRET` dengan deskripsi `Git source secret`, lalu pakai sebagai source secret BuildConfig.
-- Template punya label `template: shop-ui`.
-- Semua resource bernama `shop-ui`. Build harus push image ke alamat "Image hasil build" di tabel.
+- The template already uses `${REGISTRY_URL}` in the build output, but the parameter is not defined. Define a new required parameter `REGISTRY_URL` with the description `My shop image registry`.
+- Define a new required parameter `GIT_SECRET` with the description `Git source secret`, and use it as the BuildConfig source secret.
+- The template must have the label `template: shop-ui`.
+- All created resources must be named `shop-ui`. The build must push the image to the "Built image" address in the table.
 
-Deploy template:
+Deployment template:
 
-- Semua resource bernama `shop-ui`, 2 replica, image diambil dari registry dan namespace di tabel.
-- Env `BACKEND_URL` berisi Backend URL di tabel.
-- Route HTTPS dengan hostname frontend di tabel.
-- Deployment harus benar-benar bisa mengelola Pod-nya.
+- All created resources must be named `shop-ui`, with 2 replicas, using the image from the registry and namespace in the table.
+- The `BACKEND_URL` environment variable must contain the Backend URL from the table.
+- Create an HTTPS route with the frontend hostname from the table.
+- The Deployment must actually manage its Pods.
 
-Kedua template:
+Both templates:
 
-- Semua resource yang dibuat dari template bisa dipilih dengan selector `app=shop-ui,tier=frontend`.
-- Perubahan template wajib di-commit dan di-push ke branch `v2`.
+- All resources created from the templates must be selectable with the selector `app=shop-ui,tier=frontend`.
+- You must commit and push the template changes to the `v2` branch.
 
-## Soal 7 — Helm untuk lab dan production
+## Question 7 — Helm for lab and production
 
-Persiapan: `bash prep/prep-q7.sh`
+Preparation: `bash prep/prep-q7.sh`
 
-Chart ada di `https://git.ocp4.example.com/developer/webstore-helm.git`, folder `webstore`. Versi chart harus `2.1.0` dan semua perubahan di-push ke Git.
+The chart is in `https://git.ocp4.example.com/developer/webstore-helm.git`, folder `webstore`. The chart version must be `2.1.0`, and all changes must be pushed to Git.
 
-**Untuk environment Lab**, penuhi requirement berikut:
+**For the Lab environment**, fulfill the following requirements:
 
-- Deploy aplikasi ke project `webstore-lab`.
-- Gunakan Helm release name `webstore-lab`.
-- Gunakan values file `webstore/values-lab.yaml`.
+- Deploy the application to the project `webstore-lab`.
+- Use the Helm release name `webstore-lab`.
+- Use the values file `webstore/values-lab.yaml`.
 - Image: `registry.ocp4.example.com:8443/redhattraining/hello-world-nginx:v1.0`.
-- Jumlah Pod: `2`.
-- Resource limit: CPU `200m`, memory `256Mi`.
-- Aplikasi tersedia di `https://webstore-lab.apps.ocp4.example.com` dengan TLS edge. Akses HTTP tetap diizinkan.
-- Label Pod: `stage=lab`.
-- Environment variable container: `APP_ENV=lab`.
+- Number of Pods: `2`.
+- Resource limits: CPU `200m`, memory `256Mi`.
+- The application is available at `https://webstore-lab.apps.ocp4.example.com` with edge TLS. HTTP access must still be allowed.
+- Pod label: `stage=lab`.
+- Container environment variable: `APP_ENV=lab`.
 
-**Untuk environment Production**, penuhi requirement berikut:
+**For the Production environment**, fulfill the following requirements:
 
-- Deploy aplikasi ke project `webstore-prod`.
-- Gunakan Helm release name `webstore-prod`.
-- Gunakan values file `webstore/values-prod.yaml`.
+- Deploy the application to the project `webstore-prod`.
+- Use the Helm release name `webstore-prod`.
+- Use the values file `webstore/values-prod.yaml`.
 - Image: `registry.ocp4.example.com:8443/redhattraining/hello-world-nginx:v1.0`.
-- Jumlah Pod: `4`.
-- Resource limit: CPU `500m`, memory `512Mi`. Resource request: CPU `250m`, memory `256Mi`.
-- Aplikasi tersedia di `https://webstore.apps.ocp4.example.com` dengan TLS edge. Akses HTTP harus di-redirect ke HTTPS.
-- Label Pod: `stage=production`.
-- Environment variable container: `APP_ENV=production`.
+- Number of Pods: `4`.
+- Resource limits: CPU `500m`, memory `512Mi`. Resource requests: CPU `250m`, memory `256Mi`.
+- The application is available at `https://webstore.apps.ocp4.example.com` with edge TLS. HTTP access must be redirected to HTTPS.
+- Pod label: `stage=production`.
+- Container environment variable: `APP_ENV=production`.
 
-Hint: pastikan nilai di values file benar-benar muncul di objek yang dibuat. Cek dengan `helm template` sebelum install.
+Hint: make sure the values in the values files actually appear in the created objects. Check with `helm template` before installing.
 
-## Soal 8 — Startup, liveness, dan readiness probe
+## Question 8 — Startup, liveness, and readiness probes
 
-Persiapan: `bash prep/prep-q8.sh` → Deployment `health-app` sudah punya readiness probe yang salah, jadi Pod tidak pernah Ready.
+Preparation: `bash prep/prep-q8.sh` → the `health-app` Deployment already has a wrong readiness probe, so the Pod never becomes Ready.
 
-Di project `deploy-health`, konfigurasikan container `hello-world-nginx` pada Deployment `health-app`:
+In the project `deploy-health`, configure the `hello-world-nginx` container of the `health-app` Deployment:
 
-| Probe | Pemeriksaan | Setting |
+| Probe | Check | Settings |
 | --- | --- | --- |
-| Startup | HTTP GET `/` port 8080 | period 5s, failure threshold 12 |
-| Liveness | TCP socket port 8080 | initial delay 15s, period 10s, timeout 3s, failure threshold 3 |
-| Readiness | HTTP GET `/` port 8080 | period 10s, timeout 2s, success threshold 2, failure threshold 3 |
+| Startup | HTTP GET `/` on port 8080 | period 5s, failure threshold 12 |
+| Liveness | TCP socket on port 8080 | initial delay 15s, period 10s, timeout 3s, failure threshold 3 |
+| Readiness | HTTP GET `/` on port 8080 | period 10s, timeout 2s, success threshold 2, failure threshold 3 |
 
-Probe lama yang salah tidak boleh tersisa. Pod harus `1/1 Running` dan route `health-app` merespons.
+The old, wrong probe must not remain. The Pod must be `1/1 Running`, and the `health-app` route must respond.
 
-## Soal 9 — Deploy dengan OpenShift Pipelines (Tekton)
+## Question 9 — Deploy with OpenShift Pipelines (Tekton)
 
-Persiapan: `bash prep/prep-q9.sh` → repo `tekton-web` dan skeleton `/home/student/ex288-set2/q9/pipeline-skeleton.yaml`
+Preparation: `bash prep/prep-q9.sh` → creates the `tekton-web` repository and the skeleton `/home/student/ex288-set2/q9/pipeline-skeleton.yaml`
 
-Semua dikerjakan di project `pipeline-lab`. Gunakan nilai-nilai ini persis seperti tertulis:
+All work is done in the project `pipeline-lab`. Use these values exactly as written:
 
-| Item | Nilai |
+| Item | Value |
 | --- | --- |
 | Git repository (`GIT_URL`) | `https://git.ocp4.example.com/developer/tekton-web.git` |
 | Git revision (`GIT_REVISION`) | `main` |
-| Kredensial Git | `developer` / `d3v3lop3r` |
-| File build | `Containerfile` di root repo |
-| Image hasil build (`IMAGE`) | `image-registry.openshift-image-registry.svc:5000/pipeline-lab/tekton-web:latest` |
-| Nama aplikasi (`APP_NAME`) | `tekton-web` |
+| Git credentials | `developer` / `d3v3lop3r` |
+| Build file | `Containerfile` at the repository root |
+| Built image (`IMAGE`) | `image-registry.openshift-image-registry.svc:5000/pipeline-lab/tekton-web:latest` |
+| Application name (`APP_NAME`) | `tekton-web` |
 | Service account | `pipeline` |
-| Namespace task | `openshift-pipelines` (cluster resolver) |
+| Task namespace | `openshift-pipelines` (cluster resolver) |
 
-- Buat Pipeline `build-and-deploy` dari skeleton dengan tiga task berurutan: `fetch-source` (git-clone), `build-image` (buildah), `deploy` (openshift-client).
-- `fetch-source` meng-clone `GIT_URL` pada `GIT_REVISION` di atas.
-- `build-image` mem-build `Containerfile` dan push ke alamat image di tabel.
-- `deploy` membuat Deployment, Service, dan Route `tekton-web` jika belum ada. Jika sudah ada, task ini me-restart rollout.
-- Repo Git private: kredensial disimpan sebagai secret dan dipakai service account `pipeline`.
-- Workspace memakai PVC 1Gi dari volumeClaimTemplate.
-- Jalankan PipelineRun dengan parameter `GIT_URL`, `GIT_REVISION`, `IMAGE`, dan `APP_NAME` sesuai tabel sampai `Succeeded`. Pod `tekton-web` harus Running dengan env `BUILT_BY=tekton`.
+- Create the Pipeline `build-and-deploy` from the skeleton with three sequential tasks: `fetch-source` (git-clone), `build-image` (buildah), and `deploy` (openshift-client).
+- `fetch-source` must clone `GIT_URL` at `GIT_REVISION` from the table.
+- `build-image` must build the `Containerfile` and push it to the image address in the table.
+- `deploy` must create the `tekton-web` Deployment, Service, and Route if they do not exist. If they already exist, it must restart the rollout.
+- The Git repository is private: the credentials must be stored as a secret and used by the `pipeline` service account.
+- The workspace must use a 1Gi PVC from a volumeClaimTemplate.
+- Run a PipelineRun with the `GIT_URL`, `GIT_REVISION`, `IMAGE`, and `APP_NAME` parameters from the table until it is `Succeeded`. The `tekton-web` Pod must be Running with the environment variable `BUILT_BY=tekton`.
 
-**Trigger dan EventListener** (Tekton Triggers):
+**Trigger and EventListener** (Tekton Triggers):
 
-| Item | Nilai |
+| Item | Value |
 | --- | --- |
-| TriggerBinding | `tekton-web-binding`, param `git-url` dari `$(body.git_url)` dan `git-revision` dari `$(body.revision)` |
-| TriggerTemplate | `tekton-web-template`, param `git-url` dan `git-revision` (default `main`) |
-| EventListener | `tekton-web-listener`, service account `pipeline`, memakai binding dan template di atas |
-| Route EventListener | hostname default dari service `el-tekton-web-listener` |
-| Payload event | `{"git_url": "https://git.ocp4.example.com/developer/tekton-web.git", "revision": "main"}` |
+| TriggerBinding | `tekton-web-binding`, param `git-url` from `$(body.git_url)` and `git-revision` from `$(body.revision)` |
+| TriggerTemplate | `tekton-web-template`, params `git-url` and `git-revision` (default `main`) |
+| EventListener | `tekton-web-listener`, service account `pipeline`, using the binding and template above |
+| EventListener route | default hostname for the `el-tekton-web-listener` service |
+| Event payload | `{"git_url": "https://git.ocp4.example.com/developer/tekton-web.git", "revision": "main"}` |
 
-- TriggerTemplate membuat PipelineRun `build-and-deploy` dengan `GIT_URL` dan `GIT_REVISION` dari param trigger, sedangkan `IMAGE`, `APP_NAME`, service account, dan workspace mengikuti tabel pertama.
-- Expose EventListener lewat route supaya bisa dipanggil dari luar cluster.
-- Kirim payload di atas ke route EventListener dengan HTTP POST. Event itu harus membuat PipelineRun baru yang berakhir `Succeeded`.
+- The TriggerTemplate must create a `build-and-deploy` PipelineRun with `GIT_URL` and `GIT_REVISION` taken from the trigger params, while `IMAGE`, `APP_NAME`, the service account, and the workspace follow the first table.
+- Expose the EventListener through a route so it can be called from outside the cluster.
+- Send the payload above to the EventListener route with an HTTP POST. The event must create a new PipelineRun that ends `Succeeded`.
 
-## Soal 10 — Expose internal registry dan push image
+## Question 10 — Expose the internal registry and push an image
 
-Persiapan: `bash prep/prep-q10.sh` → default route registry dimatikan, Containerfile di `/home/student/ex288-set2/q10/`.
+Preparation: `bash prep/prep-q10.sh` → the registry default route is disabled, and the Containerfile is in `/home/student/ex288-set2/q10/`.
 
-- Sebagai `admin`, expose internal registry OpenShift lewat default route.
-- Sebagai `developer`, build image dari Containerfile tersebut dengan nama `custom-nginx:1.0` memakai podman.
-- Push image ke project `registry-lab` di internal registry lewat route tadi.
-- Pastikan image stream `custom-nginx` dengan tag `1.0` muncul di `registry-lab`.
-- Hapus image lokal, lalu pull kembali dari internal registry untuk membuktikan push berhasil.
-- Deploy `custom-nginx:1.0` dari image stream, expose di hostname default, dan pastikan env `APP_TIER=registry-lab` ada di Pod.
+- As `admin`, expose the OpenShift internal image registry through its default route.
+- As `developer`, build an image named `custom-nginx:1.0` from that Containerfile using podman.
+- Push the image to the `registry-lab` project in the internal registry through that route.
+- Make sure the image stream `custom-nginx` with tag `1.0` appears in `registry-lab`.
+- Remove the local image, then pull it again from the internal registry to prove the push succeeded.
+- Deploy `custom-nginx:1.0` from the image stream, expose it on the default hostname, and make sure the Pod has the environment variable `APP_TIER=registry-lab`.

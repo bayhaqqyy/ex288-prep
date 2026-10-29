@@ -4,7 +4,7 @@ Set latihan untuk ujian **EX288 (Red Hat Certified OpenShift Application Develop
 
 | File | Isi |
 | --- | --- |
-| [`SOAL.md`](SOAL.md) | 10 soal, tanpa jawaban |
+| [`SOAL.md`](SOAL.md) | 10 soal dalam bahasa Inggris (gaya ujian EX288), tanpa jawaban |
 | [`KUNCI.md`](KUNCI.md) | Kunci jawaban dan verifikasi per soal |
 | [`prep/`](prep/) | Script preparation `prep-q1.sh` … `prep-q10.sh`, `prep-all.sh` (semua sekaligus), `cleanup.sh` (bersih-bersih) |
 | [`grade/grade.sh`](grade/grade.sh) | Script penilaian otomatis, total 300 (lulus 210) |
