@@ -721,3 +721,233 @@ curl custom-nginx-registry-lab.apps.ocp4.example.com
 ```
 
 Jalur push: route eksternal (`default-route-...`) dari workstation. Jalur pull di dalam cluster: `image-registry.openshift-image-registry.svc:5000`. Token dari `oc whoami -t` adalah password registry.
+
+## Kunci Soal 11
+
+Root cause: `COPY src .` menyalin isi folder `src` (`main/`, `test/`) ke root, sehingga struktur Maven `src/main/java` hilang. Maven tidak menemukan source (`No sources to compile`), runner JAR tidak terbentuk, dan Pod gagal dengan `Unable to access jarfile`.
+
+```bash
+oc project docker-app
+oc create secret generic myapp1-git --type=kubernetes.io/basic-auth \
+  --from-literal=username=developer --from-literal=password=d3v3lop3r
+oc annotate secret myapp1-git 'build.openshift.io/source-secret-match-uri-1=https://git.ocp4.example.com/*'
+oc secrets link builder myapp1-git
+
+oc new-app --name=myapp1-docker --strategy=docker \
+  https://git.ocp4.example.com/developer/myapp1-docker.git#main --context-dir=apps/myapp1
+oc logs -f bc/myapp1-docker          # cari: No sources to compile
+oc get pods
+oc logs deploy/myapp1-docker         # Error: Unable to access jarfile target/...-runner.jar
+
+git clone https://git.ocp4.example.com/developer/myapp1-docker.git
+cd myapp1-docker/apps/myapp1 && ls -R src | head    # src/main/java/...
+```
+
+Perbaiki satu baris di `Dockerfile`:
+
+```dockerfile
+COPY src src
+```
+
+```bash
+git commit -am "fix: preserve Maven source directory" && git push
+oc start-build myapp1-docker --follow             # sekarang ada "Compiling ... source files" dan runner JAR
+oc rollout status deployment/myapp1-docker
+oc get svc myapp1-docker || oc expose deployment myapp1-docker --port=8080
+oc expose service myapp1-docker
+curl -I http://myapp1-docker-docker-app.apps.ocp4.example.com
+```
+
+Dockerfile tanpa `EXPOSE` bisa membuat `oc new-app` tidak membuat Service. Kalau begitu, buat Service dengan `oc expose deployment ... --port=8080` seperti di atas.
+
+## Kunci Soal 12
+
+Tiga masalah di Containerfile: `USER root`, port 80 (privileged, gagal untuk UID non-root), dan `/var/cache` tidak bisa ditulis UID acak. Containerfile yang benar:
+
+```dockerfile
+FROM registry.ocp4.example.com:8443/ubi10/nodejs-22-minimal:10.0
+ENV PORT=8080
+EXPOSE ${PORT}
+ADD . $HOME
+RUN npm ci --omit=dev && rm -rf .npm
+USER root
+RUN chgrp -R 0 /var/cache && \
+    chmod -R g=u /var/cache
+USER 1001
+CMD npm start
+```
+
+```bash
+cd /home/student/ex288-set2/q12
+podman login -u developer -p developer registry.ocp4.example.com:8443
+podman build -t registry.ocp4.example.com:8443/developer/greetings:1.0.1 .
+# uji seperti OpenShift: UID acak, group 0
+podman run --rm -d --name gtest --user 12345:0 -p 8080:8080 registry.ocp4.example.com:8443/developer/greetings:1.0.1
+curl -s localhost:8080; podman logs gtest; podman rm -f gtest      # File cache OK
+podman push registry.ocp4.example.com:8443/developer/greetings:1.0.1
+
+oc project greetings-app
+oc create secret docker-registry class-registry \
+  --docker-server=registry.ocp4.example.com:8443 \
+  --docker-username=developer --docker-password=developer
+oc secrets link default class-registry --for=pull
+
+oc import-image greetings:1.0.1 --confirm --reference-policy=local \
+  --from=registry.ocp4.example.com:8443/developer/greetings:1.0.1
+oc get is greetings -o jsonpath='{.spec.tags[?(@.name=="1.0.1")].referencePolicy.type}{"\n"}'   # Local
+
+oc new-app --name=greetings -i greetings:1.0.1
+oc expose service greetings
+curl -s http://greetings-greetings-app.apps.ocp4.example.com      # {"greeting":"...","version":"1.0.1"}
+```
+
+`oc import-image` otomatis memakai secret registry yang ada di project. `--reference-policy=local` membuat cluster menarik image lewat internal registry, jadi Pod tidak perlu kredensial registry kelas.
+
+## Kunci Soal 13
+
+`assemble` di repo belum executable dan belum membuat `info.html`, dan script `run` belum ada.
+
+```bash
+git clone https://git.ocp4.example.com/developer/hello-s2i.git && cd hello-s2i
+vi .s2i/bin/assemble
+```
+
+Bagian kustomisasi `assemble`:
+
+```bash
+######## CUSTOMIZATION STARTS HERE ############
+echo "---> Installing application source"
+cp -Rf /tmp/src/*.html ./
+DATE=`date "+%b %d, %Y @ %H:%M %p"`
+echo "---> Creating info page"
+echo "Page built on $DATE" >> ./info.html
+echo "Proudly served by Apache HTTP Server version $HTTPD_VERSION" >> ./info.html
+######## CUSTOMIZATION ENDS HERE ############
+```
+
+Buat `.s2i/bin/run`:
+
+```bash
+#!/bin/bash
+source ${HTTPD_CONTAINER_SCRIPTS_PATH}/common.sh
+export HTTPD_RUN_BY_S2I=1
+# Make Apache show 'debug' level logs during start up
+exec run-httpd -e debug $@
+```
+
+```bash
+chmod +x .s2i/bin/assemble .s2i/bin/run
+git add -A && git commit -m "Customize S2I assemble and run" && git push
+git ls-files -s .s2i/bin            # keduanya harus 100755
+
+oc project builds-s2i
+oc create secret generic hello-git --type=kubernetes.io/basic-auth \
+  --from-literal=username=developer --from-literal=password=d3v3lop3r
+oc new-app --name=hello-web --source-secret=hello-git \
+  openshift/httpd:2.4-ubi9~https://git.ocp4.example.com/developer/hello-s2i.git#main
+oc logs -f bc/hello-web             # ---> Creating info page
+oc expose service hello-web --port=8080
+curl http://hello-web-builds-s2i.apps.ocp4.example.com/info.html
+oc logs deploy/hello-web | grep ':debug]' | head -3
+```
+
+Kalau lupa `chmod +x`, build gagal dengan `permission denied` saat menjalankan `assemble`. Di `run`, `exec` wajib supaya httpd menjadi PID 1 dan menerima sinyal stop dari OpenShift.
+
+## Kunci Soal 14
+
+`parent/Containerfile` yang optimal (satu `RUN`, `ENV` digabung, `ONBUILD` untuk child):
+
+```dockerfile
+FROM httpd:2.4-ubi9
+LABEL org.opencontainers.image.title="site-base" \
+      org.opencontainers.image.vendor="EX288 practice"
+RUN echo "<h1>Default site from site-base</h1>" > /var/www/html/index.html && \
+    echo "ok" > /var/www/html/health.html && \
+    mkdir -p /var/www/html/assets && \
+    echo "body { font-family: sans-serif; }" > /var/www/html/assets/site.css
+ENV SITE_NAME=default \
+    SITE_OWNER=platform-team
+EXPOSE 8080
+# Dijalankan saat image child di-build
+ONBUILD COPY src/ /var/www/html/
+CMD ["run-httpd"]
+```
+
+```bash
+git clone https://git.ocp4.example.com/developer/site-images.git && cd site-images
+vi parent/Containerfile
+git commit -am "Optimize parent image and add ONBUILD" && git push
+
+oc project production2
+oc create secret generic site-git --type=kubernetes.io/basic-auth \
+  --from-literal=username=developer --from-literal=password=d3v3lop3r
+oc annotate secret site-git 'build.openshift.io/source-secret-match-uri-1=https://git.ocp4.example.com/*'
+oc secrets link builder site-git
+
+oc new-build openshift/httpd:2.4-ubi9~https://git.ocp4.example.com/developer/site-images.git#main \
+  --name=site-base --strategy=docker --context-dir=parent
+oc logs -f bc/site-base
+
+oc new-build site-base:latest~https://git.ocp4.example.com/developer/site-images.git#main \
+  --name=site-child --strategy=docker --context-dir=child
+oc logs -f bc/site-child            # ada langkah ONBUILD COPY src/ ...
+
+oc new-app site-child:latest
+oc expose service site-child --port=8080
+curl http://site-child-production2.apps.ocp4.example.com       # Child site from ONBUILD
+```
+
+Cek jumlah layer: bandingkan `oc get istag site-base:latest -o jsonpath='{.image.dockerImageLayers[*].name}'` dengan `oc get istag httpd:2.4-ubi9 -n openshift -o jsonpath='{.image.dockerImageLayers[*].name}'`. `LABEL`, `ENV`, `EXPOSE`, `CMD`, dan `ONBUILD` tidak menambah layer; hanya `RUN`, `COPY`, dan `ADD` yang menambah.
+
+## Kunci Soal 15
+
+```bash
+oc project hooks-lab
+oc create configmap smoke-test --from-file=smoke.py=/home/student/ex288-set2/q15/smoke.py
+
+# ConfigMap sebagai build input (masuk ke root source)
+oc patch bc/hooks-api --type=merge \
+  -p '{"spec":{"source":{"configMaps":[{"configMap":{"name":"smoke-test"}}]}}}'
+
+# Post-commit hook
+oc set build-hook bc/hooks-api --post-commit --script="python3 smoke.py"
+
+# Generic webhook
+oc set triggers bc/hooks-api --from-webhook
+oc describe bc hooks-api | grep -A1 'Webhook Generic'
+SECRET=$(oc get bc hooks-api -o jsonpath='{.spec.triggers[?(@.type=="Generic")].generic.secret}')
+curl -X POST -k -H "Authorization: Bearer $(oc whoami -t)" \
+  "https://api.ocp4.example.com:6443/apis/build.openshift.io/v1/namespaces/hooks-lab/buildconfigs/hooks-api/webhooks/$SECRET/generic"
+
+oc get builds                       # build baru, cause Generic WebHook
+oc logs -f bc/hooks-api | grep 'SMOKE TEST PASSED'
+curl http://hooks-api-hooks-lab.apps.ocp4.example.com
+```
+
+Post-commit hook berjalan di container dari image yang baru di-build, dengan working directory `/opt/app-root/src`. Karena ConfigMap masuk sebagai build input, `smoke.py` ikut ter-copy ke sana. Kalau hook gagal (exit code bukan 0), build dianggap `Failed` dan image tidak di-push.
+
+## Kunci Soal 16
+
+```bash
+oc project java-builds
+oc create secret generic vertx-git --type=kubernetes.io/basic-auth \
+  --from-literal=username=developer --from-literal=password=d3v3lop3r
+oc annotate secret vertx-git 'build.openshift.io/source-secret-match-uri-1=https://git.ocp4.example.com/*'
+oc secrets link builder vertx-git
+
+oc new-app --name=vertx-site \
+  --build-env MAVEN_MIRROR_URL=http://nexus-infra.apps.ocp4.example.com/repository/java \
+  --env JAVA_APP_JAR=vertx-site-1.0.0-SNAPSHOT-fat.jar \
+  -i redhat-openjdk18-openshift:1.8 \
+  https://git.ocp4.example.com/developer/vertx-site.git#main
+oc logs -f bc/vertx-site
+
+oc patch bc/vertx-site --type=merge -p '{"spec":{"strategy":{"sourceStrategy":{"incremental":true}}}}'
+oc start-build vertx-site --follow  # build kedua memakai artifact dari build sebelumnya
+oc get builds                       # minimal 2 Complete
+
+oc expose service vertx-site
+curl -I http://vertx-site-java-builds.apps.ocp4.example.com
+```
+
+Ingat: `--build-env` (`MAVEN_MIRROR_URL`) hanya ada saat build, sedangkan `--env` (`JAVA_APP_JAR`) masuk ke Deployment. Kalau build gagal mengunduh dependency, cek URL mirror Nexus Maven di lab kelasmu (beberapa materi menulis `http://nexus-infra.apps.ocp4.example.com/java`).

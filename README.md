@@ -4,10 +4,10 @@ Set latihan untuk ujian **EX288 (Red Hat Certified OpenShift Application Develop
 
 | File | Isi |
 | --- | --- |
-| [`SOAL.md`](SOAL.md) | 10 soal dalam bahasa Inggris (gaya ujian EX288), tanpa jawaban |
+| [`SOAL.md`](SOAL.md) | 16 soal dalam bahasa Inggris (gaya ujian EX288), tanpa jawaban |
 | [`KUNCI.md`](KUNCI.md) | Kunci jawaban dan verifikasi per soal |
 | [`prep/`](prep/) | Script preparation `prep-q1.sh` … `prep-q10.sh`, `prep-all.sh` (semua sekaligus), `cleanup.sh` (bersih-bersih) |
-| [`grade/grade.sh`](grade/grade.sh) | Script penilaian otomatis, total 300 (lulus 210) |
+| [`grade/grade.sh`](grade/grade.sh) | Script penilaian otomatis: ujian inti 1–10 = 300 (lulus 210), tambahan 11–16 = 180 |
 
 ## Daftar soal
 
@@ -23,6 +23,19 @@ Set latihan untuk ujian **EX288 (Red Hat Certified OpenShift Application Develop
 | 8 | Startup, liveness, readiness probe | `deploy-health` |
 | 9 | OpenShift Pipelines (Tekton): git-clone → buildah → deploy | `pipeline-lab` |
 | 10 | Expose internal registry + push dengan podman | `registry-lab` |
+
+Soal tambahan (11–16), diambil dari materi referensi Devopswala yang lain:
+
+| No | Topik | Project | Referensi |
+| --- | --- | --- | --- |
+| 11 | Troubleshoot Docker build aplikasi Maven (`COPY src .`) | `docker-app` | `01-01-Containerfile.md` |
+| 12 | Podman build + fix image, push ke registry kelas, ImageStream + pull secret | `greetings-app` | `01-02-Building-Containers-...md` |
+| 13 | Kustomisasi S2I `assemble` + `run` httpd | `builds-s2i` | `01-02-customizing-existing-S2I-image.md` |
+| 14 | Optimasi Containerfile + parent/child `ONBUILD` | `production2` | `02-02-Optimize-containerfile.md` |
+| 15 | Post-commit build hook + ConfigMap build input + generic webhook | `hooks-lab` | `04-02-EX288-task66-lab-creation.md` |
+| 16 | S2I Java: `MAVEN_MIRROR_URL`, `JAVA_APP_JAR`, incremental build | `java-builds` | `01:02-oc-new-app.md`, `01-02-java-app.md` |
+
+Soal 11 dan 16 memakai isi repo bawaan kelas `DO288-apps` di GitLab lab (`apps/docker-app/myapp1-docker` dan `apps/builds-applications/vertx-site`), jadi dependency Maven-nya sudah tersedia di Nexus kelas.
 
 ## Lingkungan lab
 
@@ -58,7 +71,7 @@ Di workstation lab, sebagai user `student`:
     git clone https://github.com/bayhaqqyy/ex288-prep.git
     cd ex288-prep
 
-    bash prep/prep-all.sh          # siapkan semua soal 1-10 sekaligus
+    bash prep/prep-all.sh          # siapkan semua soal 1-16 sekaligus
     bash prep/prep-all.sh 2 6 7    # atau soal tertentu saja
     bash prep/prep-q1.sh           # atau satu soal langsung
     ```
@@ -68,7 +81,7 @@ Di workstation lab, sebagai user `student`:
 3. Setelah selesai latihan, bersihkan:
 
     ```bash
-    bash prep/cleanup.sh               # hapus project + file lab soal 1-10 (minta konfirmasi)
+    bash prep/cleanup.sh               # hapus project + file lab soal 1-16 (minta konfirmasi)
     bash prep/cleanup.sh 2 7           # soal tertentu saja
     bash prep/cleanup.sh -y            # tanpa konfirmasi
     bash prep/cleanup.sh --all-extra   # + clone lokal repo latihan, image podman, default route registry off
@@ -82,17 +95,18 @@ Kalau `oc new-app` menampilkan `warning: Cannot check if git requires authentica
 
 Lalu kerjakan soal di `SOAL.md` tanpa membuka `KUNCI.md`. Gunakan `oc --help`, `oc explain`, dan dokumentasi OpenShift seperti saat ujian.
 
-## Penilaian (total 300, lulus 210)
+## Penilaian (ujian inti 300, lulus 210)
 
 Setelah selesai, periksa jawabanmu dengan:
 
 ```bash
 cd ex288-prep
-bash grade/grade.sh          # semua soal -> nilai total /300 + LULUS / BELUM LULUS
+bash grade/grade.sh          # semua soal 1-16 -> nilai per soal, inti /300 + LULUS, tambahan /180
+bash grade/grade.sh 1 2 3 4 5 6 7 8 9 10   # hanya ujian inti
 bash grade/grade.sh 3 7      # hanya soal tertentu
 ```
 
-Setiap soal bernilai 30 poin, dipecah menjadi beberapa pemeriksaan berbobot. Contohnya Soal 7: chart 2.1.0 di Git, release lab dan prod, jumlah Pod, limit/request, label, env, serta route dan TLS. Batas lulus 210/300 (70%), mengikuti EX288.
+Setiap soal bernilai 30 poin, dipecah menjadi beberapa pemeriksaan berbobot. Contohnya Soal 7: chart 2.1.0 di Git, release lab dan prod, jumlah Pod, limit/request, label, env, serta route dan TLS. Vonis lulus dihitung dari ujian inti Soal 1–10: batas 210/300 (70%), mengikuti EX288. Soal 11–16 dinilai terpisah (/180) sebagai latihan tambahan, dan total keseluruhan /480 ikut ditampilkan.
 
 Cara kerja grader:
 
@@ -115,8 +129,10 @@ Soal 7 - Helm lab + production
 Ringkasan
   Soal 1     30/30   S2I Node.js: JSON error + prom-client
   ...
-  TOTAL    254/300
-  LULUS (batas lulus 210/300)
+  Ujian inti (Soal 1-10)    254/300
+  Soal tambahan (11-16)     150/180
+  TOTAL                     404/480  (84%)
+  LULUS ujian inti (batas lulus 210/300)
 ```
 
 Catatan:

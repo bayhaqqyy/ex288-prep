@@ -2,7 +2,7 @@
 # ---------------------------------------------------------------
 # EX288 Prep - siapkan semua soal sekaligus
 #
-#   bash prep/prep-all.sh          # siapkan soal 1-10
+#   bash prep/prep-all.sh          # siapkan soal 1-16
 #   bash prep/prep-all.sh 1 3 6    # siapkan soal tertentu saja
 #
 # Setiap prep-qN.sh dijalankan berurutan di proses terpisah. Kalau satu
@@ -17,7 +17,7 @@ mkdir -p "$LOG_DIR" 2>/dev/null || LOG_DIR="$(mktemp -d)"
 
 if [ -t 1 ]; then G=$'\e[32m'; R=$'\e[31m'; B=$'\e[1m'; N=$'\e[0m'; else G=; R=; B=; N=; fi
 
-if [ $# -gt 0 ]; then QS=("$@"); else QS=(1 2 3 4 5 6 7 8 9 10); fi
+if [ $# -gt 0 ]; then QS=("$@"); else QS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16); fi
 
 # Kredensial Git dulu, supaya git dan oc new-app bisa membaca repo lab
 git config --global credential.helper store

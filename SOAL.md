@@ -212,3 +212,86 @@ Credentials:
 - Make sure the image stream `custom-nginx` with tag `1.0` appears in `registry-lab`.
 - Remove the local image, then pull it again from the internal registry to prove the push succeeded.
 - Deploy `custom-nginx:1.0` from the image stream, expose it on the default hostname, and make sure the Pod has the environment variable `APP_TIER=registry-lab`.
+
+## Question 11 — Troubleshoot a Docker build of a Maven application
+
+Preparation: `bash prep/prep-q11.sh`
+
+- Build and deploy the application from `https://git.ocp4.example.com/developer/myapp1-docker.git`, branch `main`, subdirectory `apps/myapp1`.
+- The application must be deployed to the project `docker-app`. All resources must be named `myapp1-docker`.
+- The build must use the Dockerfile provided in the repository (Docker strategy).
+- The Git server requires authentication (`developer` / `d3v3lop3r`). The credentials must be stored as a secret and made available to the build process.
+- The application currently does not start. Find the root cause from the build logs, the Pod logs, and the Maven project structure, then fix the Dockerfile and push the fix to Git. Do not change `pom.xml` or the Java sources.
+- The application must be running and accessible on the default route hostname `myapp1-docker-docker-app.apps.ocp4.example.com`.
+
+## Question 12 — Build with Podman, push to a secured registry, and deploy from an image stream
+
+Preparation: `bash prep/prep-q12.sh` → the source code and `Containerfile` are in `/home/student/ex288-set2/q12/`
+
+- Build the container image from the provided `Containerfile` with podman. The image must be OpenShift compatible:
+    - It must not run as root.
+    - It must listen on port 8080.
+    - The application must be able to write its file cache in `/var/cache` when it runs with an arbitrary user ID.
+- Push the fixed image as `registry.ocp4.example.com:8443/developer/greetings:1.0.1`. Registry credentials: `developer` / `developer`.
+- Work in the project `greetings-app`. All resources must be named `greetings`.
+- The registry requires authentication. Store the registry credentials as a secret in the project so that OpenShift can import and pull the image.
+- Create the image stream `greetings` with the tag `1.0.1` that imports the image from the classroom registry. The tag must use the `Local` reference policy.
+- Deploy the application from the image stream tag `greetings:1.0.1` and expose it on the default hostname. The response must be JSON with a `greeting` field.
+
+## Question 13 — Customize the S2I scripts of the httpd builder image
+
+Preparation: `bash prep/prep-q13.sh`
+
+- Build and deploy the application from `https://git.ocp4.example.com/developer/hello-s2i.git`, branch `main`.
+- The application must be deployed to the project `builds-s2i`. All resources must be named `hello-web`.
+- The application must use the `httpd:2.4-ubi9` builder image from the `openshift` namespace.
+- The Git credentials (`developer` / `d3v3lop3r`) must be stored as a secret and used by the build.
+- The custom `assemble` script in the repository must install the HTML files and create an `info.html` page that contains:
+    - `Page built on <build date>`
+    - `Proudly served by Apache HTTP Server version <HTTPD_VERSION>`
+- Add a custom `run` script that starts Apache with the `debug` log level and keeps httpd as PID 1.
+- The custom S2I scripts must be executable in the Git repository.
+- Expose the application on the default hostname. `/info.html` must show the build information.
+
+## Question 14 — Optimize a Containerfile and build parent and child images
+
+Preparation: `bash prep/prep-q14.sh`
+
+All work is done in the project `production2`. The repository is `https://git.ocp4.example.com/developer/site-images.git`, branch `main` (Git credentials `developer` / `d3v3lop3r`):
+
+| Directory | Image stream | Role |
+| --- | --- | --- |
+| `parent` | `site-base` | Parent image |
+| `child` | `site-child` | Child image |
+
+- Optimize `parent/Containerfile`:
+    - The parent image must add at most one filesystem layer on top of its base image.
+    - The image must support image inheritance: a child image must replace the web content with its own `src/` directory, copied to `/var/www/html/` when the child image is built.
+    - Keep the default content (`index.html`, `health.html`, `assets/site.css`), the environment variables, port 8080, and the start command.
+- Push the Containerfile changes to Git.
+- Build the parent image with a Docker strategy BuildConfig named `site-base` (context directory `parent`) based on the image stream tag `httpd:2.4-ubi9` from the `openshift` namespace.
+- Build the child image with a BuildConfig named `site-child` (context directory `child`) based on the image stream tag `site-base:latest`.
+- Deploy `site-child` and expose it on the default hostname. It must show `Child site from ONBUILD`.
+
+## Question 15 — Build hook, config map build input, and webhook trigger
+
+Preparation: `bash prep/prep-q15.sh` → the `hooks-api` application is already running in the project `hooks-lab`, and the smoke test script is `/home/student/ex288-set2/q15/smoke.py`.
+
+- You have read-only access to the Git repository. Do not add the script to Git.
+- Store the script in a ConfigMap named `smoke-test` with the key `smoke.py`, and make it available to every future build of `hooks-api` as a build input in the source directory.
+- Configure a post-commit build hook so that every build runs `python3 smoke.py` after the image is built.
+- Add a generic webhook trigger to the `hooks-api` BuildConfig and start a new build by calling the webhook URL. The build must be `Complete`, and its log must contain `SMOKE TEST PASSED`.
+- The application must still respond at `http://hooks-api-hooks-lab.apps.ocp4.example.com`.
+
+## Question 16 — S2I Java build with a Maven mirror and incremental builds
+
+Preparation: `bash prep/prep-q16.sh`
+
+- Build and deploy the application from `https://git.ocp4.example.com/developer/vertx-site.git`, branch `main`.
+- The application must be deployed to the project `java-builds`. All resources must be named `vertx-site`.
+- The application must use the `redhat-openjdk18-openshift:1.8` builder image from the `openshift` namespace.
+- The Git credentials (`developer` / `d3v3lop3r`) must be stored as a secret and used by the build.
+- Maven dependencies must be downloaded from `http://nexus-infra.apps.ocp4.example.com/repository/java` through the `MAVEN_MIRROR_URL` build environment variable.
+- At runtime, the container must have the environment variable `JAVA_APP_JAR=vertx-site-1.0.0-SNAPSHOT-fat.jar`.
+- Enable incremental builds so that Maven artifacts from the previous build are reused, then run a second build.
+- Expose the application on the default hostname. `http://vertx-site-java-builds.apps.ocp4.example.com` must respond.

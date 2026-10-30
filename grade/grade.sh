@@ -45,6 +45,12 @@ TITLE=(
   "Startup, liveness, readiness probe"
   "OpenShift Pipelines (Tekton)"
   "Expose internal registry + push"
+  "Troubleshoot Docker build Maven"
+  "Podman build + push + ImageStream"
+  "Kustomisasi S2I assemble + run"
+  "Optimasi Containerfile + ONBUILD"
+  "Build hook + config map + webhook"
+  "S2I Java: Maven mirror + incremental"
 )
 
 # check <soal> <poin> <deskripsi> <perintah...>
@@ -438,16 +444,203 @@ grade_q10() {
   check 10 4 "Route custom-nginx merespons 200" http_code "http://custom-nginx-registry-lab.$APPS/" 200
 }
 
+# =================== helper tambahan ===================
+http_ok_any() { # app merespons (200-499), bukan 503 router/000
+  local c; c="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 15 "$1")"
+  [ "$c" -ge 200 ] 2>/dev/null && [ "$c" -lt 500 ]
+}
+git_mode_exec() { # repo branch path -> file executable di Git
+  local d; d="$(git_dir "$1" "$2")" || return 1
+  [ "$(git -C "$d" ls-files -s -- "$3" | awk '{print $1}')" = "100755" ]
+}
+last_complete_build() { # ns bc -> nama build Complete terakhir
+  oc get builds -n "$1" -l "openshift.io/build-config.name=$2" \
+    -o jsonpath='{range .items[*]}{.status.phase} {.metadata.name}{"\n"}{end}' 2>/dev/null \
+    | awk '$1=="Complete"{n=split($2,a,"-"); print a[n], $2}' | sort -n | tail -1 | cut -d' ' -f2
+}
+count_complete_builds() {
+  oc get builds -n "$1" -l "openshift.io/build-config.name=$2" \
+    -o jsonpath='{range .items[*]}{.status.phase}{"\n"}{end}' 2>/dev/null | grep -c '^Complete$'
+}
+
+# =================== SOAL 11 ===================
+q11_bc() {
+  jp_eq docker-app bc/myapp1-docker '{.spec.strategy.type}' Docker &&
+  jp_has docker-app bc/myapp1-docker '{.spec.source.git.uri}' 'developer/myapp1-docker' &&
+  jp_eq docker-app bc/myapp1-docker '{.spec.source.contextDir}' apps/myapp1
+}
+q11_dockerfile() {
+  local d f; d="$(git_dir myapp1-docker main)" || return 1
+  f="$d/apps/myapp1/Dockerfile"
+  ! grep -qE '^[[:space:]]*COPY[[:space:]]+src/?[[:space:]]+\./?[[:space:]]*$' "$f" &&
+  grep -qE '^[[:space:]]*COPY[[:space:]]+(src/?[[:space:]]+(\./)?src/?|\.[[:space:]]+\.?/?)[[:space:]]*$' "$f"
+}
+q11_logs() {
+  local l; l="$(oc logs -n docker-app deploy/myapp1-docker 2>/dev/null)" || return 1
+  ! echo "$l" | grep -q 'Unable to access jarfile'
+}
+grade_q11() {
+  local ns=docker-app
+  check 11 4 "BuildConfig myapp1-docker: Docker strategy, repo myapp1-docker, context apps/myapp1" q11_bc
+  check 11 6 "Dockerfile di Git mempertahankan struktur src Maven (bukan 'COPY src .')" q11_dockerfile
+  check 11 4 "Build terakhir Complete" build_complete $ns myapp1-docker
+  check 11 6 "Deployment myapp1-docker Ready dan JAR ditemukan" q11_ready_logs
+  check 11 4 "Route hostname default myapp1-docker-docker-app.$APPS" route_ok $ns myapp1-docker "myapp1-docker-docker-app.$APPS" - -
+  check 11 6 "Aplikasi menjawab lewat route (bukan 503)" http_ok_any "http://myapp1-docker-docker-app.$APPS/"
+}
+q11_ready_logs() { deploy_ready docker-app myapp1-docker && q11_logs; }
+
+# =================== SOAL 12 ===================
+q12_istag() {
+  exists greetings-app istag/greetings:1.0.1 &&
+  jp_has greetings-app istag/greetings:1.0.1 '{.image.dockerImageReference}' 'registry.ocp4.example.com:8443/developer/greetings'
+}
+q12_pullsecret() {
+  local s
+  for s in $(oc get secret -n greetings-app --field-selector=type=kubernetes.io/dockerconfigjson -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+    oc get secret -n greetings-app "$s" -o jsonpath='{.data.\.dockerconfigjson}' 2>/dev/null | base64 -d 2>/dev/null \
+      | grep -q 'registry.ocp4.example.com:8443' && return 0
+  done
+  return 1
+}
+q12_image_cfg() {
+  local u p
+  u="$(jp greetings-app istag/greetings:1.0.1 '{.image.dockerImageMetadata.Config.User}')"
+  p="$(jp greetings-app istag/greetings:1.0.1 '{.image.dockerImageMetadata.Config.ExposedPorts}')"
+  [ -n "$u" ] && [ "$u" != root ] && [ "$u" != 0 ] && [ "${u%%:*}" != 0 ] && [ "${u%%:*}" != root ] &&
+  echo "$p" | grep -q '8080' && ! echo "$p" | grep -q '"80/'
+}
+q12_deploy() {
+  deploy_ready greetings-app greetings &&
+  oc get deploy greetings -n greetings-app -o yaml 2>/dev/null | grep -qE 'greetings:1\.0\.1|image-registry\.openshift-image-registry\.svc:5000/greetings-app/greetings'
+}
+q12_logs() { oc logs -n greetings-app deploy/greetings 2>/dev/null | grep -q 'File cache OK'; }
+grade_q12() {
+  local ns=greetings-app
+  check 12 4 "ImageStreamTag greetings:1.0.1 diimpor dari registry.ocp4.example.com:8443/developer/greetings" q12_istag
+  check 12 4 "Pull secret dockerconfigjson untuk registry.ocp4.example.com:8443 ada di project" q12_pullsecret
+  check 12 4 "Tag greetings:1.0.1 memakai referencePolicy Local" jp_eq $ns is/greetings '{.spec.tags[?(@.name=="1.0.1")].referencePolicy.type}' Local
+  check 12 5 "Image 1.0.1: USER non-root dan expose port 8080" q12_image_cfg
+  check 12 5 "Deployment greetings Ready memakai image dari image stream greetings:1.0.1" q12_deploy
+  check 12 4 "Log aplikasi: File cache OK (izin /var/cache benar)" q12_logs
+  check 12 4 "Route greetings-greetings-app.$APPS mengembalikan JSON greeting" http_has "http://greetings-greetings-app.$APPS/" '"greeting"'
+}
+
+# =================== SOAL 13 ===================
+q13_bc() {
+  jp_eq builds-s2i bc/hello-web '{.spec.strategy.sourceStrategy.from.name}' httpd:2.4-ubi9 &&
+  jp_has builds-s2i bc/hello-web '{.spec.source.git.uri}' 'developer/hello-s2i'
+}
+q13_assemble_info() {
+  local d; d="$(git_dir hello-s2i main)" || return 1
+  grep -q 'info.html' "$d/.s2i/bin/assemble" && grep -q 'Page built on' "$d/.s2i/bin/assemble" &&
+  grep -q 'HTTPD_VERSION' "$d/.s2i/bin/assemble"
+}
+q13_run() {
+  local d; d="$(git_dir hello-s2i main)" || return 1
+  [ -f "$d/.s2i/bin/run" ] && git_mode_exec hello-s2i main .s2i/bin/run &&
+  grep -qE '^[[:space:]]*exec[[:space:]]+run-httpd[[:space:]]+-e[[:space:]]+debug' "$d/.s2i/bin/run"
+}
+q13_debug_log() { oc logs -n builds-s2i deploy/hello-web 2>/dev/null | grep -q ':debug\]'; }
+grade_q13() {
+  local ns=builds-s2i
+  check 13 3 "BuildConfig hello-web: builder httpd:2.4-ubi9, repo hello-s2i" q13_bc
+  check 13 5 "assemble di Git executable (mode 100755)" git_mode_exec hello-s2i main .s2i/bin/assemble
+  check 13 5 "assemble membuat info.html (Page built on + HTTPD_VERSION)" q13_assemble_info
+  check 13 5 "run script ada, executable, memakai exec run-httpd -e debug" q13_run
+  check 13 3 "Build terakhir Complete" build_complete $ns hello-web
+  check 13 3 "Route hostname default hello-web-builds-s2i.$APPS" route_ok $ns hello-web "hello-web-builds-s2i.$APPS" - -
+  check 13 3 "/info.html berisi 'Page built on'" http_has "http://hello-web-builds-s2i.$APPS/info.html" "Page built on"
+  check 13 3 "Log httpd berlevel debug" q13_debug_log
+}
+
+# =================== SOAL 14 ===================
+q14_parent_file() {
+  local d f; d="$(git_dir site-images main)" || return 1
+  f="$d/parent/Containerfile"
+  grep -qE '^[[:space:]]*ONBUILD[[:space:]]+COPY[[:space:]]+src/?[[:space:]]+/var/www/html/?' "$f" &&
+  [ "$(grep -cE '^[[:space:]]*RUN[[:space:]]' "$f")" -le 1 ]
+}
+q14_parent_bc() {
+  jp_eq production2 bc/site-base '{.spec.strategy.type}' Docker &&
+  jp_eq production2 bc/site-base '{.spec.source.contextDir}' parent &&
+  jp_eq production2 bc/site-base '{.spec.strategy.dockerStrategy.from.name}' httpd:2.4-ubi9
+}
+q14_layers() {
+  local base parent
+  base="$(oc get istag httpd:2.4-ubi9 -n openshift -o jsonpath='{range .image.dockerImageLayers[*]}{.name}{"\n"}{end}' 2>/dev/null | grep -c .)"
+  parent="$(jp production2 istag/site-base:latest '{range .image.dockerImageLayers[*]}{.name}{"\n"}{end}' | grep -c .)"
+  [ "$base" -gt 0 ] && [ "$parent" -gt 0 ] && [ $(( parent - base )) -le 1 ]
+}
+q14_child() {
+  jp_eq production2 bc/site-child '{.spec.source.contextDir}' child &&
+  jp_eq production2 bc/site-child '{.spec.strategy.dockerStrategy.from.name}' site-base:latest &&
+  build_complete production2 site-child
+}
+grade_q14() {
+  local ns=production2
+  check 14 4 "Containerfile parent di Git: ONBUILD COPY src/ /var/www/html/ dan maksimal 1 RUN" q14_parent_file
+  check 14 4 "BuildConfig site-base: Docker, context parent, FROM openshift/httpd:2.4-ubi9" q14_parent_bc
+  check 14 3 "Build site-base terakhir Complete" build_complete $ns site-base
+  check 14 5 "Image site-base menambah maksimal 1 layer di atas base" q14_layers
+  check 14 4 "Image site-base menyimpan instruksi ONBUILD COPY" jp_has $ns istag/site-base:latest '{.image.dockerImageMetadata.Config.OnBuild}' 'COPY'
+  check 14 4 "BuildConfig site-child: context child, FROM site-base:latest, build Complete" q14_child
+  check 14 3 "Deployment site-child Ready" deploy_ready $ns site-child
+  check 14 3 "Route site-child-production2.$APPS menampilkan konten child" http_has "http://site-child-production2.$APPS/" "Child site from ONBUILD"
+}
+
+# =================== SOAL 15 ===================
+q15_cm() { jp_nonempty hooks-lab cm/smoke-test '{.data.smoke\.py}'; }
+q15_hook() {
+  oc get bc hooks-api -n hooks-lab -o jsonpath='{.spec.postCommit}' 2>/dev/null | grep -q 'smoke.py'
+}
+q15_webhook_build() {
+  oc get builds -n hooks-lab -l openshift.io/build-config.name=hooks-api \
+    -o jsonpath='{range .items[*]}{.status.phase}|{.spec.triggeredBy[*].message}{"\n"}{end}' 2>/dev/null \
+    | grep -qE '^Complete\|.*Generic WebHook'
+}
+q15_hook_log() {
+  local b; b="$(last_complete_build hooks-lab hooks-api)"; [ -n "$b" ] || return 1
+  oc logs -n hooks-lab "build/$b" 2>/dev/null | grep -q 'SMOKE TEST PASSED'
+}
+grade_q15() {
+  local ns=hooks-lab
+  check 15 5 "ConfigMap smoke-test berisi key smoke.py" q15_cm
+  check 15 5 "BuildConfig hooks-api memakai ConfigMap smoke-test sebagai build input" jp_has $ns bc/hooks-api '{.spec.source.configMaps[*].configMap.name}' smoke-test
+  check 15 6 "Post-commit build hook menjalankan smoke.py" q15_hook
+  check 15 4 "BuildConfig punya trigger Generic webhook" jp_has $ns bc/hooks-api '{.spec.triggers[*].type}' Generic
+  check 15 4 "Ada build Complete yang dipicu Generic WebHook" q15_webhook_build
+  check 15 4 "Log build terakhir berisi SMOKE TEST PASSED" q15_hook_log
+  check 15 2 "Route hooks-api merespons 200" http_code "http://hooks-api-hooks-lab.$APPS/" 200
+}
+
+# =================== SOAL 16 ===================
+q16_bc() {
+  jp_eq java-builds bc/vertx-site '{.spec.strategy.sourceStrategy.from.name}' redhat-openjdk18-openshift:1.8 &&
+  jp_eq java-builds bc/vertx-site '{.spec.strategy.sourceStrategy.from.namespace}' openshift &&
+  jp_has java-builds bc/vertx-site '{.spec.source.git.uri}' 'developer/vertx-site'
+}
+q16_two_builds() { [ "$(count_complete_builds java-builds vertx-site)" -ge 2 ]; }
+grade_q16() {
+  local ns=java-builds
+  check 16 4 "BuildConfig vertx-site: S2I openshift/redhat-openjdk18-openshift:1.8, repo vertx-site" q16_bc
+  check 16 5 "Build env MAVEN_MIRROR_URL = Nexus java" jp_eq $ns bc/vertx-site '{.spec.strategy.sourceStrategy.env[?(@.name=="MAVEN_MIRROR_URL")].value}' "http://nexus-infra.apps.ocp4.example.com/repository/java"
+  check 16 5 "Runtime env JAVA_APP_JAR = vertx-site-1.0.0-SNAPSHOT-fat.jar" jp_eq $ns deploy/vertx-site '{.spec.template.spec.containers[0].env[?(@.name=="JAVA_APP_JAR")].value}' vertx-site-1.0.0-SNAPSHOT-fat.jar
+  check 16 5 "Incremental build aktif di BuildConfig" jp_eq $ns bc/vertx-site '{.spec.strategy.sourceStrategy.incremental}' true
+  check 16 4 "Minimal 2 build Complete" q16_two_builds
+  check 16 3 "Deployment vertx-site Ready" deploy_ready $ns vertx-site
+  check 16 4 "Route vertx-site-java-builds.$APPS merespons 200" http_code "http://vertx-site-java-builds.$APPS/" 200
+}
+
 # =================== MAIN ===================
 oc get --help >/dev/null 2>&1 || { echo "oc tidak ditemukan"; exit 1; }
 admin_login || { echo "Gagal login sebagai admin ke $OCP_API"; exit 1; }
 
-if [ $# -gt 0 ]; then QS=("$@"); else QS=(1 2 3 4 5 6 7 8 9 10); fi
-FULL=0; [ $# -eq 0 ] && FULL=1
+if [ $# -gt 0 ]; then QS=("$@"); else QS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16); fi
 
 out "${B}EX288 Prep - Penilaian$(date '+  (%F %T)')${N}"
 for q in "${QS[@]}"; do
-  case "$q" in [1-9]|10) ;; *) echo "Nomor soal tidak dikenal: $q"; continue ;; esac
+  case "$q" in [1-9]|1[0-6]) ;; *) echo "Nomor soal tidak dikenal: $q"; continue ;; esac
   out ""
   out "${B}Soal $q - ${TITLE[$q]}${N}"
   "grade_q$q"
@@ -456,22 +649,29 @@ done
 
 out ""
 out "${B}Ringkasan${N}"
-TOTAL=0; MAXT=0
+TOTAL=0; MAXT=0; CORE=0; CORE_MAX=0; CORE_N=0; EXTRA=0; EXTRA_MAX=0
 for q in "${QS[@]}"; do
   [ -n "${MAXQ[$q]:-}" ] || continue
   TOTAL=$(( TOTAL + SCORE[$q] )); MAXT=$(( MAXT + MAXQ[$q] ))
+  if [ "$q" -le 10 ]; then
+    CORE=$(( CORE + SCORE[$q] )); CORE_MAX=$(( CORE_MAX + MAXQ[$q] )); CORE_N=$(( CORE_N + 1 ))
+  else
+    EXTRA=$(( EXTRA + SCORE[$q] )); EXTRA_MAX=$(( EXTRA_MAX + MAXQ[$q] ))
+  fi
   out "  $(printf 'Soal %-3s %3d/%-3d  %s' "$q" "${SCORE[$q]}" "${MAXQ[$q]}" "${TITLE[$q]}")"
 done
 out "  ---------------------------------------------"
-out "  ${B}$(printf 'TOTAL    %3d/%-3d' "$TOTAL" "$MAXT")${N}"
-if [ "$FULL" -eq 1 ]; then
-  if [ "$TOTAL" -ge "$PASS_MARK" ]; then
-    out "  ${G}${B}LULUS${N} (batas lulus $PASS_MARK/300)"
+[ "$CORE_MAX" -gt 0 ]  && out "  ${B}$(printf 'Ujian inti (Soal 1-10)    %3d/%-3d' "$CORE" "$CORE_MAX")${N}"
+[ "$EXTRA_MAX" -gt 0 ] && out "  ${B}$(printf 'Soal tambahan (11-16)     %3d/%-3d' "$EXTRA" "$EXTRA_MAX")${N}"
+out "  ${B}$(printf 'TOTAL                     %3d/%-3d  (%d%%)' "$TOTAL" "$MAXT" $(( MAXT > 0 ? TOTAL * 100 / MAXT : 0 )))${N}"
+if [ "$CORE_N" -eq 10 ]; then
+  if [ "$CORE" -ge "$PASS_MARK" ]; then
+    out "  ${G}${B}LULUS${N} ujian inti (batas lulus $PASS_MARK/300)"
   else
-    out "  ${R}${B}BELUM LULUS${N} (batas lulus $PASS_MARK/300, kurang $(( PASS_MARK - TOTAL )) poin)"
+    out "  ${R}${B}BELUM LULUS${N} ujian inti (batas lulus $PASS_MARK/300, kurang $(( PASS_MARK - CORE )) poin)"
   fi
 else
-  out "  ${Y}Penilaian sebagian. Jalankan tanpa argumen untuk nilai total /300.${N}"
+  out "  ${Y}Penilaian sebagian. Jalankan tanpa argumen (atau 1-10) untuk vonis lulus /300.${N}"
 fi
 out ""
 out "Laporan tersimpan di: $REPORT"

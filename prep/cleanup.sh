@@ -2,7 +2,7 @@
 # ---------------------------------------------------------------
 # EX288 Prep - bersihkan semua sisa latihan
 #
-#   bash prep/cleanup.sh                 # bersihkan soal 1-10 (minta konfirmasi)
+#   bash prep/cleanup.sh                 # bersihkan soal 1-16 (minta konfirmasi)
 #   bash prep/cleanup.sh 2 7             # bersihkan soal tertentu saja
 #   bash prep/cleanup.sh -y              # tanpa konfirmasi
 #   bash prep/cleanup.sh --safe          # jangan lepas finalizer paksa
@@ -35,10 +35,17 @@ declare -A PROJECTS=(
   [8]="deploy-health"
   [9]="pipeline-lab"
   [10]="registry-lab"
+  [11]="docker-app"
+  [12]="greetings-app"
+  [13]="builds-s2i"
+  [14]="production2"
+  [15]="hooks-lab"
+  [16]="java-builds"
 )
 declare -A REPOS=(
   [1]="metrics-api" [2]="legacy-web" [3]="portal-s2i" [6]="shop-ui"
-  [7]="webstore-helm" [9]="tekton-web"
+  [7]="webstore-helm" [9]="tekton-web" [11]="myapp1-docker" [13]="hello-s2i"
+  [14]="site-images" [15]="hooks-api" [16]="vertx-site"
 )
 
 YES=0; EXTRA=0; SAFE=0; QS=()
@@ -47,12 +54,12 @@ for a in "$@"; do
     -y|--yes) YES=1 ;;
     --all-extra) EXTRA=1 ;;
     --safe) SAFE=1 ;;
-    [1-9]|10) QS+=("$a") ;;
+    [1-9]|1[0-6]) QS+=("$a") ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "Argumen tidak dikenal: $a"; exit 1 ;;
   esac
 done
-[ ${#QS[@]} -gt 0 ] || QS=(1 2 3 4 5 6 7 8 9 10)
+[ ${#QS[@]} -gt 0 ] || QS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16)
 
 ALL_PROJECTS=""
 for q in "${QS[@]}"; do ALL_PROJECTS="$ALL_PROJECTS ${PROJECTS[$q]}"; done
@@ -152,6 +159,12 @@ if [ "$EXTRA" -eq 1 ]; then
       fi
     done
   done
+  # Image podman soal 12
+  if printf '%s\n' "${QS[@]}" | grep -qx 12; then
+    podman images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep '/developer/greetings' | while read -r img; do
+      podman rmi -f "$img" >/dev/null 2>&1 && echo "  ${G}hapus${N} image $img"
+    done
+  fi
   # Image podman soal 10
   if printf '%s\n' "${QS[@]}" | grep -qx 10; then
     podman images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep 'custom-nginx' | while read -r img; do
