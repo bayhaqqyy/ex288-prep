@@ -486,7 +486,13 @@ grade_q11() {
   check 11 4 "Build terakhir Complete" build_complete $ns myapp1-docker
   check 11 6 "Deployment myapp1-docker Ready dan JAR ditemukan" q11_ready_logs
   check 11 4 "Route hostname default myapp1-docker-docker-app.$APPS" route_ok $ns myapp1-docker "myapp1-docker-docker-app.$APPS" - -
-  check 11 6 "Aplikasi menjawab lewat route (bukan 503)" http_ok_any "http://myapp1-docker-docker-app.$APPS/"
+  check 11 6 "Endpoint REST aplikasi merespons 200 lewat route (source Java ter-compile)" q11_endpoint
+}
+q11_endpoint() { # path diambil dari anotasi @Path di source Java repo
+  local d ep; d="$(git_dir myapp1-docker main)" || return 1
+  ep="$(grep -rhoP '@Path\("\K[^"]+' "$d/apps/myapp1/src/main/java" 2>/dev/null | head -1)"
+  if [ -n "$ep" ]; then http_code "http://myapp1-docker-docker-app.$APPS/${ep#/}" 200
+  else http_ok_any "http://myapp1-docker-docker-app.$APPS/"; fi
 }
 q11_ready_logs() { deploy_ready docker-app myapp1-docker && q11_logs; }
 

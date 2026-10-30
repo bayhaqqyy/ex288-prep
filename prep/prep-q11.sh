@@ -180,13 +180,23 @@ cd "$WORK"
 if ! git clone -q --depth 1 "https://${GIT_USER}:${GIT_PASS}@${GIT_HOST}/${GIT_USER}/DO288-apps.git" apps-src; then
   echo "Repo DO288-apps tidak ditemukan di GitLab lab. Soal 11 butuh repo bawaan kelas DO288."; exit 1
 fi
-SRC="apps-src/apps/docker-app/myapp1-docker"
-[ -f "$SRC/pom.xml" ] || { echo "Folder $SRC tidak ada di DO288-apps"; exit 1; }
+# Cari proyek Maven di repo kelas: myapp1-docker kalau ada, kalau tidak expense-service
+SRC=""
+for cand in '*/docker-app/myapp1-docker' '*/builds-review/expense-service' \
+            '*/deployments-applications/expense-service' '*/expense-service'; do
+  SRC="$(find apps-src -type d -path "$cand" -not -path '*/.git/*' 2>/dev/null | sort | head -1)"
+  [ -n "$SRC" ] && [ -f "$SRC/pom.xml" ] && break
+  SRC=""
+done
+[ -n "$SRC" ] || { echo "Tidak ada proyek Maven (myapp1-docker / expense-service) di DO288-apps"; exit 1; }
+log "Memakai proyek Maven dari DO288-apps: ${SRC#apps-src/}"
 mkdir -p repo/apps/myapp1
-cp -r "$SRC/pom.xml" "$SRC/src" repo/apps/myapp1/
-[ -f "$SRC/settings.xml" ] && cp "$SRC/settings.xml" repo/apps/myapp1/
+cp -r "$SRC"/. repo/apps/myapp1/
+rm -rf repo/apps/myapp1/.git repo/apps/myapp1/target repo/apps/myapp1/.s2i
+rm -f repo/apps/myapp1/Dockerfile repo/apps/myapp1/Containerfile
 
-# BUG (disengaja): "COPY src ." merusak struktur src/main/java Maven
+# BUG (disengaja): "COPY src ." merusak struktur src/main/java Maven.
+# CMD shell form supaya cocok untuk uber-jar (*-runner.jar) maupun fast-jar Quarkus.
 cat > repo/apps/myapp1/Dockerfile <<EOF
 FROM ${CLASS_REGISTRY}/redhattraining/ocpdev-ubi8-openjdk-17-base:1.16
 
@@ -196,8 +206,11 @@ RUN mvn dependency:go-offline
 COPY src .
 RUN mvn clean package
 
-CMD ["java", "-jar", "target/myapp1-docker-1.0.0-SNAPSHOT-runner.jar"]
+EXPOSE 8080
+CMD java -jar \$(ls target/*-runner.jar target/quarkus-app/quarkus-run.jar 2>/dev/null | head -1)
 EOF
+EP="$(grep -rhoP '@Path\("\K[^"]+' repo/apps/myapp1/src/main/java 2>/dev/null | head -1)"
+[ -n "$EP" ] && log "Endpoint REST aplikasi: ${EP}"
 rm -rf apps-src
 push_repo "$WORK/repo" myapp1-docker main
 cd "$HOME"; rm -rf "$WORK"

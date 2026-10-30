@@ -182,8 +182,11 @@ cd "$WORK"
 if ! git clone -q --depth 1 "https://${GIT_USER}:${GIT_PASS}@${GIT_HOST}/${GIT_USER}/DO288-apps.git" apps-src; then
   echo "Repo DO288-apps tidak ditemukan di GitLab lab. Soal 16 butuh repo bawaan kelas DO288."; exit 1
 fi
-SRC="apps-src/apps/builds-applications/vertx-site"
-[ -f "$SRC/pom.xml" ] || { echo "Folder $SRC tidak ada di DO288-apps"; exit 1; }
+SRC="$(find apps-src -type d -path '*/builds-applications/vertx-site' -not -path '*/.git/*' | head -1)"
+[ -n "$SRC" ] && [ -f "$SRC/pom.xml" ] || { echo "Folder builds-applications/vertx-site tidak ada di DO288-apps"; exit 1; }
+log "Memakai proyek dari DO288-apps: ${SRC#apps-src/}"
+AID="$(python3 -c 'import sys,xml.etree.ElementTree as E;r=E.parse(sys.argv[1]).getroot();n={"m":r.tag.split("}")[0].strip("{")};print(r.findtext("m:artifactId",namespaces=n)+"-"+(r.findtext("m:version",namespaces=n) or r.findtext("m:parent/m:version",namespaces=n)))' "$SRC/pom.xml" 2>/dev/null)"
+[ "$AID" = "vertx-site-1.0.0-SNAPSHOT" ] || warn "pom.xml vertx-site menghasilkan ${AID:-?}; nama JAR di soal (vertx-site-1.0.0-SNAPSHOT-fat.jar) mungkin perlu disesuaikan"
 mkdir -p repo
 cp -r "$SRC"/. repo/
 rm -rf repo/.git apps-src

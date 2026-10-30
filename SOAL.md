@@ -222,7 +222,7 @@ Preparation: `bash prep/prep-q11.sh`
 - The build must use the Dockerfile provided in the repository (Docker strategy).
 - The Git server requires authentication (`developer` / `d3v3lop3r`). The credentials must be stored as a secret and made available to the build process.
 - The application currently does not start. Find the root cause from the build logs, the Pod logs, and the Maven project structure, then fix the Dockerfile and push the fix to Git. Do not change `pom.xml` or the Java sources.
-- The application must be running and accessible on the default route hostname `myapp1-docker-docker-app.apps.ocp4.example.com`.
+- The application must be running and accessible on the default route hostname `myapp1-docker-docker-app.apps.ocp4.example.com`. Its REST endpoint (for example `/expenses`) must return HTTP 200.
 
 ## Question 12 — Build with Podman, push to a secured registry, and deploy from an image stream
 

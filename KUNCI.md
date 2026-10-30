@@ -724,7 +724,9 @@ Jalur push: route eksternal (`default-route-...`) dari workstation. Jalur pull d
 
 ## Kunci Soal 11
 
-Root cause: `COPY src .` menyalin isi folder `src` (`main/`, `test/`) ke root, sehingga struktur Maven `src/main/java` hilang. Maven tidak menemukan source (`No sources to compile`), runner JAR tidak terbentuk, dan Pod gagal dengan `Unable to access jarfile`.
+Prep mengambil proyek Maven dari repo kelas `DO288-apps` (`myapp1-docker` kalau ada, kalau tidak `expense-service` Quarkus) ke repo `myapp1-docker` folder `apps/myapp1`. Lihat baris `Memakai proyek Maven ...` dan `Endpoint REST aplikasi ...` di output prep.
+
+Root cause: `COPY src .` menyalin isi folder `src` (`main/`, `test/`) ke root image, sehingga struktur Maven `src/main/java` hilang. Maven tidak menemukan source (`No sources to compile`), jadi kelas REST tidak ikut ter-compile. Gejalanya bisa berupa JAR tidak ditemukan saat start, atau aplikasi jalan tapi endpoint REST mengembalikan 404.
 
 ```bash
 oc project docker-app
@@ -737,10 +739,13 @@ oc new-app --name=myapp1-docker --strategy=docker \
   https://git.ocp4.example.com/developer/myapp1-docker.git#main --context-dir=apps/myapp1
 oc logs -f bc/myapp1-docker          # cari: No sources to compile
 oc get pods
-oc logs deploy/myapp1-docker         # Error: Unable to access jarfile target/...-runner.jar
+oc logs deploy/myapp1-docker
+oc expose service myapp1-docker
+curl -i http://myapp1-docker-docker-app.apps.ocp4.example.com/expenses   # 404 sebelum diperbaiki
 
 git clone https://git.ocp4.example.com/developer/myapp1-docker.git
 cd myapp1-docker/apps/myapp1 && ls -R src | head    # src/main/java/...
+grep -rn '@Path' src/main/java                      # path endpoint REST
 ```
 
 Perbaiki satu baris di `Dockerfile`:
@@ -751,14 +756,12 @@ COPY src src
 
 ```bash
 git commit -am "fix: preserve Maven source directory" && git push
-oc start-build myapp1-docker --follow             # sekarang ada "Compiling ... source files" dan runner JAR
+oc start-build myapp1-docker --follow             # sekarang ada "Compiling N source files"
 oc rollout status deployment/myapp1-docker
-oc get svc myapp1-docker || oc expose deployment myapp1-docker --port=8080
-oc expose service myapp1-docker
-curl -I http://myapp1-docker-docker-app.apps.ocp4.example.com
+curl -i http://myapp1-docker-docker-app.apps.ocp4.example.com/expenses   # 200
 ```
 
-Dockerfile tanpa `EXPOSE` bisa membuat `oc new-app` tidak membuat Service. Kalau begitu, buat Service dengan `oc expose deployment ... --port=8080` seperti di atas.
+Kalau `oc new-app` tidak membuat Service, buat dengan `oc expose deployment myapp1-docker --port=8080` lalu `oc expose service myapp1-docker`.
 
 ## Kunci Soal 12
 
