@@ -6,7 +6,7 @@ Set latihan untuk ujian **EX288 (Red Hat Certified OpenShift Application Develop
 | --- | --- |
 | [`SOAL.md`](SOAL.md) | 16 soal dalam bahasa Inggris (gaya ujian EX288), tanpa jawaban |
 | [`KUNCI.md`](KUNCI.md) | Kunci jawaban dan verifikasi per soal |
-| [`prep/`](prep/) | Script preparation `prep-q1.sh` … `prep-q10.sh`, `prep-all.sh` (semua sekaligus), `cleanup.sh` (bersih-bersih) |
+| [`prep/`](prep/) | Script preparation `prep-q1.sh` … `prep-q16.sh`, `prep-all.sh` (semua sekaligus), `cleanup.sh` (bersih-bersih), `make-repos-public.sh` (repo GitLab jadi public) |
 | [`grade/grade.sh`](grade/grade.sh) | Script penilaian otomatis: ujian inti 1–10 = 300 (lulus 210), tambahan 11–16 = 180 |
 
 ## Daftar soal
@@ -90,6 +90,8 @@ Di workstation lab, sebagai user `student`:
     Cleanup mematikan Pod tanpa grace period, menghapus isi project, lalu menghapus project. Kalau setelah 10 detik masih Terminating, finalizer semua objek dilepas dan namespace di-finalize paksa sebagai admin, jadi tidak ada lagi yang stuck. Kalau mau mode hati-hati (tanpa lepas finalizer paksa), tambahkan `--safe`.
 
     Repo di GitLab lab tidak dihapus karena butuh token API. Prep berikutnya menimpa isinya, jadi aman dibiarkan.
+
+Script prep otomatis menjadikan repo latihan di GitLab lab **public**, supaya `oc new-app` bisa membaca repo tanpa kredensial. Untuk repo yang sudah ada tanpa me-reset isinya, jalankan `bash prep/make-repos-public.sh`. Soal tetap meminta secret Git untuk build, sesuai pola ujian.
 
 Kalau `oc new-app` menampilkan `warning: Cannot check if git requires authentication` lalu `none of the arguments provided could be classified as a source code location`, berarti langkah 1 belum jalan. Ulangi langkah 1, lalu coba lagi.
 

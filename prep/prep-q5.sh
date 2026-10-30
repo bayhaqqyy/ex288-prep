@@ -115,6 +115,30 @@ reset_project() {
   oc new-project "$p"
 }
 
+# make_public <nama-repo>: jadikan project GitLab public supaya oc new-app
+# bisa membaca repo tanpa kredensial. Token OAuth diambil dari user/password
+# GitLab (password grant) dan di-cache selama script berjalan.
+GITLAB_TOKEN=""
+make_public() {
+  local repo="$1" resp
+  if [ -z "$GITLAB_TOKEN" ]; then
+    GITLAB_TOKEN="$(curl -sk --max-time 20 -X POST "https://${GIT_HOST}/oauth/token" \
+      -d grant_type=password -d "username=${GIT_USER}" --data-urlencode "password=${GIT_PASS}" 2>/dev/null \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null)"
+  fi
+  if [ -z "$GITLAB_TOKEN" ]; then
+    warn "Tidak bisa mengambil token GitLab. Ubah repo ${repo} jadi public manual: Settings > General > Visibility."
+    return 0
+  fi
+  resp="$(curl -sk --max-time 20 -X PUT -H "Authorization: Bearer ${GITLAB_TOKEN}" \
+    "https://${GIT_HOST}/api/v4/projects/${GIT_USER}%2F${repo}" -d visibility=public 2>/dev/null)"
+  if echo "$resp" | grep -q '"visibility":"public"'; then
+    log "Repo ${repo} sekarang public"
+  else
+    warn "Gagal menjadikan ${repo} public (${resp:0:120}). Ubah manual di GitLab: Settings > General > Visibility."
+  fi
+}
+
 # push_repo <dir> <nama-repo> <branch>
 # Tanpa force push (branch di GitLab lab otomatis protected setelah push
 # pertama). Kalau repo/branch sudah ada: clone history-nya, ganti isinya
@@ -151,6 +175,7 @@ push_repo() {
   rc=$?
   rm -rf "$tmp"
   [ "$rc" -eq 0 ] || return "$rc"
+  make_public "$repo"
   log "Repo https://${GIT_HOST}/${GIT_USER}/${repo}.git (branch ${branch}) siap"
 }
 
