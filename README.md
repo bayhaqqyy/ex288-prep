@@ -13,7 +13,7 @@ Set latihan untuk ujian **EX288 (Red Hat Certified OpenShift Application Develop
 
 | No | Topik | Project |
 | --- | --- | --- |
-| 1 | S2I Node.js: JSON error + `Cannot find module 'prom-client'` | `metrics-prod` |
+| 1 | S2I Node.js: JSON error + `prom-client` di `devDependencies` (`Cannot find module`) | `metrics-prod` |
 | 2 | Docker build dari base image + env Nexus (`npm_config_registry`) | `legacy-prod` |
 | 3 | S2I httpd: `SERVER_PORT=8081` lewat `.s2i/bin/run` | `deploy-portal` |
 | 4 | httpd Docker build dengan binary tar (`--from-archive`) | `deploy-docs` |
@@ -129,7 +129,7 @@ Soal 7 - Helm lab + production
   Subtotal: 26/30
 
 Ringkasan
-  Soal 1     30/30   S2I Node.js: JSON error + prom-client
+  Soal 1     30/30   S2I Node.js: JSON error + prom-client devDependencies
   ...
   Ujian inti (Soal 1-10)    254/300
   Soal tambahan (11-16)     150/180

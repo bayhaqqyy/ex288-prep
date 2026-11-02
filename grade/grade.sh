@@ -35,7 +35,7 @@ out()  { printf '%s\n' "$*"; printf '%s\n' "$*" | sed 's/\x1b\[[0-9;]*m//g' >> "
 declare -A SCORE MAXQ
 TITLE=(
   ""
-  "S2I Node.js: JSON error + prom-client"
+  "S2I Node.js: JSON error + prom-client devDependencies"
   "Docker build + env Nexus"
   "S2I httpd SERVER_PORT=8081"
   "Binary tar build httpd"
@@ -117,7 +117,8 @@ admin_login() {
 # =================== SOAL 1 ===================
 q1_git() {
   local d; d="$(git_dir metrics-api release-v1)" || return 1
-  python3 -m json.tool "$d/apps/metrics/package.json" >/dev/null && grep -q '"prom-client"' "$d/apps/metrics/package.json"
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if "prom-client" in d.get("dependencies",{}) else 1)' \
+    "$d/apps/metrics/package.json" 2>/dev/null
 }
 q1_bc() {
   jp_has metrics-prod bc/metrics-api '{.spec.source.git.uri}' 'developer/metrics-api' &&
@@ -134,7 +135,7 @@ grade_q1() {
   check 1 3 "Builder openshift/nodejs:18-ubi9" q1_builder
   check 1 4 "Git secret terpasang sebagai sourceSecret BuildConfig" jp_nonempty $ns bc/metrics-api '{.spec.source.sourceSecret.name}'
   check 1 3 "Build env npm_config_registry = Nexus" jp_eq $ns bc/metrics-api '{.spec.strategy.sourceStrategy.env[?(@.name=="npm_config_registry")].value}' "$NEXUS_NPM"
-  check 1 4 "package.json di Git valid dan berisi prom-client" q1_git
+  check 1 4 "package.json di Git valid, prom-client di dependencies (bukan devDependencies)" q1_git
   check 1 3 "Build terakhir Complete" build_complete $ns metrics-api
   check 1 3 "Deployment metrics-api Ready" deploy_ready $ns metrics-api
   check 1 3 "Route edge + insecure Allow di metrics-api-metrics-prod.$APPS" route_ok $ns metrics-api "metrics-api-metrics-prod.$APPS" edge Allow

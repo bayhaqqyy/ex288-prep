@@ -195,7 +195,7 @@ check_npm_pkg() {
   fi
 }
 
-# ===== Soal 1: S2I Node.js - JSON error + module prom-client not found =====
+# ===== Soal 1: S2I Node.js - JSON error + prom-client di devDependencies =====
 WORK="${SET_DIR}/q1"
 login_dev
 reset_project metrics-prod
@@ -206,7 +206,10 @@ rm -rf "$WORK"; mkdir -p "$WORK/apps/metrics"
 cd "$WORK/apps/metrics"
 
 # BUG 1 (disengaja): koma hilang setelah blok dependencies
-# BUG 2 (disengaja): prom-client dipakai di server.js tapi tidak ada di dependencies
+# BUG 2 (disengaja): prom-client dipakai di server.js tapi diletakkan di
+#   devDependencies. Assemble S2I Node.js menjalankan "npm prune" saat
+#   NODE_ENV=production (default), jadi build Complete tetapi Pod crash
+#   dengan "Cannot find module 'prom-client'".
 cat > package.json <<'EOF'
 {
   "name": "metrics-api",
@@ -219,6 +222,9 @@ cat > package.json <<'EOF'
   "dependencies": {
     "express": "^4.20.0"
   }
+  "devDependencies": {
+    "prom-client": "^15.1.0"
+  },
   "license": "MIT"
 }
 EOF

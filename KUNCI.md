@@ -15,7 +15,12 @@ Kredensial di workstation hanya dipakai `oc new-app` dan `git` lokal. Build di c
 
 ## Kunci Soal 1
 
-Dua bug: koma hilang di `package.json` (build gagal `EJSONPARSE`), dan `prom-client` tidak ada di dependencies (Pod `CrashLoopBackOff` dengan `Cannot find module 'prom-client'`).
+Dua bug:
+
+1. Koma hilang setelah blok `dependencies` di `package.json`, sehingga build gagal dengan `EJSONPARSE`.
+2. `prom-client` dipakai di `server.js`, tetapi diletakkan di `devDependencies`. Setelah bug 1 diperbaiki, build **Complete**, tetapi Pod `CrashLoopBackOff` dengan `Cannot find module 'prom-client'`. Penyebabnya, assemble S2I Node.js meng-install semua paket lalu menjalankan `npm prune` karena `NODE_ENV=production` (default image). Di log build terlihat `---> Pruning the development dependencies`, dan `prom-client` ikut terhapus.
+
+Perbaikan yang benar adalah memindahkan `prom-client` ke `dependencies`. Jangan mengakali dengan `--build-env NODE_ENV=development` atau `DEV_MODE=true`, karena itu menjalankan aplikasi production dalam mode development.
 
 ```bash
 oc project metrics-prod
@@ -34,9 +39,10 @@ git clone https://git.ocp4.example.com/developer/metrics-api.git
 cd metrics-api && git checkout release-v1 && cd apps/metrics
 python3 -m json.tool package.json  # tunjukkan baris yang rusak
 grep require server.js             # lihat module yang dipakai
+grep -A3 devDependencies package.json   # prom-client nyasar di sini
 ```
 
-Perbaiki `package.json`:
+Perbaiki `package.json`: tambahkan koma yang hilang, pindahkan `prom-client` ke `dependencies`, lalu hapus blok `devDependencies` yang kini kosong:
 
 ```json
   "dependencies": {
@@ -46,9 +52,17 @@ Perbaiki `package.json`:
   "license": "MIT"
 ```
 
+Kalau bug 1 sudah diperbaiki tetapi Pod masih crash, cek urutan ini:
+
+```bash
+oc logs bc/metrics-api | grep -i prun   # "Pruning the development dependencies"
+oc logs deploy/metrics-api              # Cannot find module 'prom-client'
+oc rsh deploy/metrics-api printenv NODE_ENV   # production
+```
+
 ```bash
 python3 -m json.tool package.json >/dev/null && echo valid
-git commit -am "Fix package.json syntax and add prom-client" && git push
+git commit -am "Fix package.json syntax and move prom-client to dependencies" && git push
 oc start-build metrics-api --follow
 oc get pods                        # metrics-api-xxxx 1/1 Running
 oc create route edge metrics-api --service=metrics-api \
