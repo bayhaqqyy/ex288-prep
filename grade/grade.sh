@@ -68,12 +68,17 @@ declare -A OBJ_NAME=(
 )
 declare -A OSC OMX   # key: "<core|extra>:<OBJ>"
 
+# hint <teks>: alasan kegagalan yang dicetak di bawah baris [FAIL]
+HINT_FILE="$TMP/hint"
+hint() { printf '%s\n' "$*" >> "$HINT_FILE"; }
+
 # check <soal> <objective> <poin> <deskripsi> <perintah...>
 check() {
   local q="$1" obj="$2" pts="$3" desc="$4" set=core; shift 4
   [ "$q" -le 10 ] || set=extra
   MAXQ[$q]=$(( ${MAXQ[$q]:-0} + pts ))
   OMX[$set:$obj]=$(( ${OMX[$set:$obj]:-0} + pts ))
+  : > "$HINT_FILE"
   if "$@" >/dev/null 2>&1; then
     SCORE[$q]=$(( ${SCORE[$q]:-0} + pts ))
     OSC[$set:$obj]=$(( ${OSC[$set:$obj]:-0} + pts ))
@@ -82,6 +87,7 @@ check() {
     SCORE[$q]=$(( ${SCORE[$q]:-0} ))
     OSC[$set:$obj]=$(( ${OSC[$set:$obj]:-0} ))
     out "  ${R}[FAIL]${N} $(printf '%2d' "$pts") poin  $(printf '%-5s' "$obj")  $desc"
+    while IFS= read -r h; do out "                       ${Y}-> $h${N}"; done < "$HINT_FILE"
   fi
 }
 
@@ -143,6 +149,12 @@ git_dir() { # repo branch -> path clone (cache)
 git_grep() { # repo branch file regex
   local d; d="$(git_dir "$1" "$2")" || return 1
   grep -qE -- "$4" "$d/$3"
+}
+
+# yaml_json <file>: ubah YAML ke JSON (PyYAML, atau oc sebagai cadangan)
+yaml_json() {
+  python3 -c 'import sys,json,yaml; json.dump(yaml.safe_load(open(sys.argv[1])),sys.stdout)' "$1" 2>/dev/null \
+    || oc create --dry-run=client -o json -f "$1" 2>/dev/null
 }
 
 admin_login() {
@@ -291,15 +303,65 @@ grade_q5() {
 }
 
 # =================== SOAL 6 ===================
-q6_param() { # file param description
-  local d; d="$(git_dir shop-ui v2)" || return 1
-  grep -A4 -E -- "^[[:space:]]*- name:[[:space:]]*$2[[:space:]]*$" "$d/$1" | grep -q 'required: true' &&
-  grep -A4 -E -- "^[[:space:]]*- name:[[:space:]]*$2[[:space:]]*$" "$d/$1" | grep -qF -- "$3"
+# Template dibaca sebagai YAML (bukan grep), jadi urutan key, tanda kutip,
+# dan gaya inline tidak berpengaruh. Kalau gagal, alasannya dicetak.
+q6_json() { # file -> path JSON
+  local d out="$TMP/q6-$(basename "$1").json"
+  [ -s "$out" ] && { printf '%s' "$out"; return 0; }
+  d="$(git_dir shop-ui v2)" || { hint "repo shop-ui branch v2 tidak bisa di-clone dari GitLab"; return 1; }
+  [ -f "$d/$1" ] || { hint "$1 tidak ada di branch v2"; return 1; }
+  yaml_json "$d/$1" > "$out" && [ -s "$out" ] \
+    || { rm -f "$out"; hint "$1 di branch v2 bukan YAML valid (cek: oc process -f $1 --parameters)"; return 1; }
+  printf '%s' "$out"
 }
-q6_secret_tpl() {
-  local d; d="$(git_dir shop-ui v2)" || return 1
-  q6_param templates/shop-build.yaml GIT_SECRET "Git source secret" &&
-  grep -A1 'sourceSecret:' "$d/templates/shop-build.yaml" | grep -q '\${GIT_SECRET}'
+q6_last_commit() {
+  local d; d="$(git_dir shop-ui v2)" || return 0
+  hint "commit terakhir di origin/v2: $(git -C "$d" log -1 --format='%h %s' 2>/dev/null) (perubahan sudah di-push?)"
+}
+# q6_py <file> <mode> [arg...]: cek isi template, cetak alasan kalau gagal
+q6_py() {
+  local j; j="$(q6_json "$1")" || return 1; shift
+  local msg
+  msg="$(python3 - "$j" "$@" <<'PY'
+import json, sys
+t = json.load(open(sys.argv[1])); mode = sys.argv[2]; a = sys.argv[3:]
+def param(name, desc):
+    ps = [p for p in (t.get("parameters") or []) if str(p.get("name", "")).strip() == name]
+    if not ps: return f"parameter {name} tidak ditemukan"
+    p = ps[0]; e = []
+    if str(p.get("required", "")).strip().lower() != "true":
+        e.append(f"{name}: required harus true (sekarang: {p.get('required')})")
+    if str(p.get("description", "")).strip() != desc:
+        e.append(f"{name}: description harus '{desc}' (sekarang: '{p.get('description')}')")
+    return "; ".join(e)
+err = ""
+if mode == "param":
+    err = param(a[0], a[1])
+elif mode == "secret":
+    err = param("GIT_SECRET", "Git source secret")
+    bcs = [o for o in (t.get("objects") or []) if o.get("kind") == "BuildConfig"]
+    if not bcs:
+        err = (err + "; " if err else "") + "tidak ada objek BuildConfig di template"
+    else:
+        ss = ((bcs[0].get("spec") or {}).get("source") or {}).get("sourceSecret") or {}
+        if str(ss.get("name", "")).replace(" ", "") != "${GIT_SECRET}":
+            err = (err + "; " if err else "") + \
+                f"BuildConfig spec.source.sourceSecret.name harus ${{GIT_SECRET}} (sekarang: {ss.get('name')})"
+elif mode == "label":
+    ml = ((t.get("metadata") or {}).get("labels") or {})
+    if str(ml.get("template", "")).strip() != "shop-ui":
+        top = (t.get("labels") or {})
+        if str(top.get("template", "")).strip() == "shop-ui":
+            err = "label template: shop-ui ada di 'labels:' (label untuk objek), harusnya di metadata.labels milik Template"
+        else:
+            err = f"metadata.labels template harus shop-ui (sekarang: {ml or 'kosong'})"
+if err:
+    print(err); sys.exit(1)
+PY
+)" && return 0
+  [ -n "$msg" ] && hint "$msg"
+  q6_last_commit
+  return 1
 }
 q6_bc() {
   jp_nonempty lion bc/shop-ui '{.spec.source.sourceSecret.name}' &&
@@ -308,16 +370,23 @@ q6_bc() {
   jp_eq lion bc/shop-ui '{.spec.output.to.name}' "$INT_REG/lion/shop-ui:latest"
 }
 q6_labels() {
-  local k
+  local k lb rc=0
   for k in bc deploy svc route; do
-    [ -n "$(oc get -n lion "$k" -l app=shop-ui,tier=frontend -o name 2>/dev/null)" ] || return 1
+    if ! oc get -n lion "$k/shop-ui" >/dev/null 2>&1; then
+      hint "$k/shop-ui tidak ada di project lion"; rc=1; continue
+    fi
+    lb="$(oc get -n lion "$k/shop-ui" -o jsonpath='{.metadata.labels.app}={.metadata.labels.tier}' 2>/dev/null)"
+    if [ "$lb" != "shop-ui=frontend" ]; then
+      hint "$k/shop-ui label app=${lb%%=*} tier=${lb#*=} (butuh app=shop-ui, tier=frontend)"; rc=1
+    fi
   done
+  return $rc
 }
 grade_q6() {
   local ns=lion
-  check 6 TPL 4 "Build template: parameter wajib REGISTRY_URL 'My shop image registry'" q6_param templates/shop-build.yaml REGISTRY_URL "My shop image registry"
-  check 6 CMS 3 "Build template: parameter GIT_SECRET dipakai sebagai sourceSecret" q6_secret_tpl
-  check 6 TPL 2 "Build template punya label template: shop-ui" git_grep shop-ui v2 templates/shop-build.yaml 'template:[[:space:]]*shop-ui'
+  check 6 TPL 4 "Build template: parameter wajib REGISTRY_URL 'My shop image registry'" q6_py templates/shop-build.yaml param REGISTRY_URL "My shop image registry"
+  check 6 CMS 3 "Build template: parameter GIT_SECRET dipakai sebagai sourceSecret" q6_py templates/shop-build.yaml secret
+  check 6 TPL 2 "Build template punya label template: shop-ui" q6_py templates/shop-build.yaml label
   check 6 TPL 4 "BuildConfig shop-ui: secret, branch v2, context app, output ke $INT_REG/lion/shop-ui:latest" q6_bc
   check 6 TPL 3 "Build terakhir Complete" build_complete $ns shop-ui
   check 6 OCP 3 "Deployment shop-ui 2 replica Ready" deploy_ready $ns shop-ui 2
