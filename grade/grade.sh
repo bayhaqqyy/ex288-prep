@@ -110,21 +110,44 @@ objective_report() {
 
 # ---------- helper ----------
 jp()          { oc get -n "$1" "$2" -o jsonpath="$3" 2>/dev/null; }
-jp_eq()       { [ "$(jp "$1" "$2" "$3")" = "$4" ]; }
-jp_has()      { jp "$1" "$2" "$3" | grep -qF -- "$4"; }
-jp_nonempty() { [ -n "$(jp "$1" "$2" "$3")" ]; }
-exists()      { oc get -n "$1" "$2" >/dev/null 2>&1; }
+jp_eq() {
+  local v; v="$(jp "$1" "$2" "$3")"
+  [ "$v" = "$4" ] && return 0
+  hint "$2 $3 = '${v:-kosong}', harus '$4'"; return 1
+}
+jp_has() {
+  local v; v="$(jp "$1" "$2" "$3")"
+  printf '%s' "$v" | grep -qF -- "$4" && return 0
+  hint "$2 $3 = '${v:-kosong}', harus memuat '$4'"; return 1
+}
+jp_nonempty() { [ -n "$(jp "$1" "$2" "$3")" ] && return 0; hint "$2 $3 kosong"; return 1; }
+exists() { oc get -n "$1" "$2" >/dev/null 2>&1 && return 0; hint "$2 tidak ada di project $1"; return 1; }
+# url_eq / dir_eq: sama seperti jp_eq, tapi abaikan garis miring di ujung (dan ./ di awal untuk path)
+url_eq() {
+  local v; v="$(jp "$1" "$2" "$3")"
+  [ "${v%/}" = "${4%/}" ] && return 0
+  hint "$2 $3 = '${v:-kosong}', harus '$4'"; return 1
+}
+dir_eq() {
+  local v n; v="$(jp "$1" "$2" "$3")"; n="${v#./}"; n="${n#/}"; n="${n%/}"
+  [ "$n" = "$4" ] && return 0
+  hint "$2 $3 = '${v:-kosong}', harus '$4'"; return 1
+}
 
 deploy_ready() { # ns name [replicas]
   local want="${3:-}" ready spec
   ready="$(jp "$1" "deploy/$2" '{.status.readyReplicas}')"
   spec="$(jp "$1" "deploy/$2" '{.spec.replicas}')"
-  [ -n "$ready" ] && [ "$ready" = "$spec" ] && { [ -z "$want" ] || [ "$spec" = "$want" ]; }
+  if [ -n "$ready" ] && [ "$ready" = "$spec" ] && { [ -z "$want" ] || [ "$spec" = "$want" ]; }; then return 0; fi
+  if ! oc get -n "$1" "deploy/$2" >/dev/null 2>&1; then hint "deploy/$2 tidak ada di project $1"
+  else hint "deploy/$2 ready ${ready:-0}/${spec:-?}${want:+ (butuh $want replica)}"; fi
+  return 1
 }
 
 build_complete() { # ns bc  -> build terakhir Complete
   local v; v="$(jp "$1" "bc/$2" '{.status.lastVersion}')"
-  [ -n "$v" ] && jp_eq "$1" "build/$2-$v" '{.status.phase}' Complete
+  [ -n "$v" ] || { hint "bc/$2 tidak ada atau belum pernah build"; return 1; }
+  jp_eq "$1" "build/$2-$v" '{.status.phase}' Complete
 }
 
 route_ok() { # ns name host termination insecurePolicy  ("-" = abaikan)
@@ -134,21 +157,34 @@ route_ok() { # ns name host termination insecurePolicy  ("-" = abaikan)
   [ "$5" = "-" ] || jp_eq "$ns" "route/$n" '{.spec.tls.insecureEdgeTerminationPolicy}' "$5" || return 1
 }
 
-http_has()  { curl -sk --max-time 15 "$1" | grep -qF -- "$2"; }
-http_code() { [ "$(curl -sk -o /dev/null -w '%{http_code}' --max-time 15 "$1")" = "$2" ]; }
+http_has() {
+  local b; b="$(curl -sk --max-time 15 "$1")"
+  printf '%s' "$b" | grep -qF -- "$2" && return 0
+  hint "$1 tidak memuat '$2' (respons: '$(printf '%s' "$b" | head -c 80 | tr '\n' ' ')')"; return 1
+}
+http_code() {
+  local c; c="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 15 "$1")"
+  [ "$c" = "$2" ] && return 0
+  hint "$1 -> HTTP $c, harus $2"; return 1
+}
 
 pod_env() { # ns deploy var value
-  [ "$(oc exec -n "$1" "deploy/$2" -- printenv "$3" 2>/dev/null)" = "$4" ]
+  local v; v="$(oc exec -n "$1" "deploy/$2" -- printenv "$3" 2>/dev/null)"
+  [ "$v" = "$4" ] && return 0
+  hint "printenv $3 di deploy/$2 = '${v:-kosong}', harus '$4'"; return 1
 }
 
 git_dir() { # repo branch -> path clone (cache)
   local d="$TMP/git-$1-$2"
-  [ -d "$d" ] || git clone -q --depth 1 -b "$2" "$GIT_BASE/$1.git" "$d" >/dev/null 2>&1 || return 1
+  [ -d "$d" ] || git clone -q --depth 1 -b "$2" "$GIT_BASE/$1.git" "$d" >/dev/null 2>&1 \
+    || { hint "repo $1 branch $2 tidak bisa di-clone dari GitLab"; return 1; }
   printf '%s' "$d"
 }
 git_grep() { # repo branch file regex
   local d; d="$(git_dir "$1" "$2")" || return 1
-  grep -qE -- "$4" "$d/$3"
+  [ -f "$d/$3" ] || { hint "$3 tidak ada di repo $1 branch $2"; return 1; }
+  grep -qE -- "$4" "$d/$3" && return 0
+  hint "$3 di repo $1 ($2) belum sesuai (commit terakhir: $(git -C "$d" log -1 --format='%h %s' 2>/dev/null))"; return 1
 }
 
 # yaml_json <file>: ubah YAML ke JSON (PyYAML, atau oc sebagai cadangan)
@@ -171,7 +207,7 @@ q1_git() {
 q1_bc() {
   jp_has metrics-prod bc/metrics-api '{.spec.source.git.uri}' 'developer/metrics-api' &&
   jp_eq metrics-prod bc/metrics-api '{.spec.source.git.ref}' release-v1 &&
-  jp_eq metrics-prod bc/metrics-api '{.spec.source.contextDir}' apps/metrics
+  dir_eq metrics-prod bc/metrics-api '{.spec.source.contextDir}' apps/metrics
 }
 q1_builder() {
   jp_eq metrics-prod bc/metrics-api '{.spec.strategy.sourceStrategy.from.name}' nodejs:18-ubi9 &&
@@ -182,7 +218,7 @@ grade_q1() {
   check 1 S2I 4 "BuildConfig metrics-api: repo, branch release-v1, context apps/metrics" q1_bc
   check 1 S2I 3 "Builder openshift/nodejs:18-ubi9" q1_builder
   check 1 CMS 4 "Git secret terpasang sebagai sourceSecret BuildConfig" jp_nonempty $ns bc/metrics-api '{.spec.source.sourceSecret.name}'
-  check 1 S2I 3 "Build env npm_config_registry = Nexus" jp_eq $ns bc/metrics-api '{.spec.strategy.sourceStrategy.env[?(@.name=="npm_config_registry")].value}' "$NEXUS_NPM"
+  check 1 S2I 3 "Build env npm_config_registry = Nexus" url_eq $ns bc/metrics-api '{.spec.strategy.sourceStrategy.env[?(@.name=="npm_config_registry")].value}' "$NEXUS_NPM"
   check 1 TRBL 4 "package.json di Git valid, prom-client di dependencies (bukan devDependencies)" q1_git
   check 1 TRBL 3 "Build terakhir Complete" build_complete $ns metrics-api
   check 1 OCP 3 "Deployment metrics-api Ready" deploy_ready $ns metrics-api
@@ -194,7 +230,7 @@ grade_q1() {
 q2_bc() {
   jp_eq legacy-prod bc/legacy-web '{.spec.strategy.type}' Docker &&
   jp_has legacy-prod bc/legacy-web '{.spec.source.git.uri}' 'developer/legacy-web' &&
-  jp_eq legacy-prod bc/legacy-web '{.spec.source.contextDir}' apps/legacy
+  dir_eq legacy-prod bc/legacy-web '{.spec.source.contextDir}' apps/legacy
 }
 q2_dockerfile() {
   local d f u; d="$(git_dir legacy-web main)" || return 1
@@ -207,10 +243,10 @@ q2_dockerfile() {
 grade_q2() {
   local ns=legacy-prod
   check 2 OCP 4 "BuildConfig legacy-web: Docker strategy, repo legacy-web, context apps/legacy" q2_bc
-  check 2 TRBL 4 "Docker build env npm_config_registry = Nexus" jp_eq $ns bc/legacy-web '{.spec.strategy.dockerStrategy.env[?(@.name=="npm_config_registry")].value}' "$NEXUS_NPM"
+  check 2 TRBL 4 "Docker build env npm_config_registry = Nexus" url_eq $ns bc/legacy-web '{.spec.strategy.dockerStrategy.env[?(@.name=="npm_config_registry")].value}' "$NEXUS_NPM"
   check 2 TRBL 5 "Dockerfile di Git: USER non-root, tanpa port 80, port 8080" q2_dockerfile
   check 2 TRBL 3 "Build terakhir Complete" build_complete $ns legacy-web
-  check 2 TRBL 4 "Deployment env APP_ENV=legacy-prod" jp_eq $ns deploy/legacy-web '{.spec.template.spec.containers[0].env[?(@.name=="APP_ENV")].value}' legacy-prod
+  check 2 TRBL 4 "Container punya env APP_ENV=legacy-prod" pod_env $ns legacy-web APP_ENV legacy-prod
   check 2 OCP 3 "Deployment legacy-web Ready" deploy_ready $ns legacy-web
   check 2 OCP 3 "Route hostname default legacy-web-legacy-prod.$APPS" route_ok $ns legacy-web "legacy-web-legacy-prod.$APPS" - -
   check 2 OCP 4 "Aplikasi menampilkan 'mode: legacy-prod'" http_has "http://legacy-web-legacy-prod.$APPS/" "mode: legacy-prod"
@@ -223,16 +259,26 @@ q3_builder() {
 }
 q3_src() {
   jp_has deploy-portal bc/portal-web '{.spec.source.git.uri}' 'developer/portal-s2i' &&
-  jp_eq deploy-portal bc/portal-web '{.spec.source.contextDir}' site
+  dir_eq deploy-portal bc/portal-web '{.spec.source.contextDir}' site
 }
 q3_no_env() {
   ! oc get -n deploy-portal bc/portal-web -o yaml | grep -q SERVER_PORT &&
   ! oc get -n deploy-portal deploy/portal-web -o yaml | grep -q SERVER_PORT &&
   exists deploy-portal bc/portal-web
 }
-q3_runtime() {
-  oc logs -n deploy-portal deploy/portal-web 2>/dev/null | grep -q 'SERVER_PORT=8081' ||
-  oc exec -n deploy-portal deploy/portal-web -- grep -aq 'SERVER_PORT=8081' /proc/1/environ
+q3_runscript() { # export SERVER_PORT=8081, boleh pakai kutip atau export terpisah
+  local d f; d="$(git_dir portal-s2i main)" || return 1
+  f="$d/site/.s2i/bin/run"
+  [ -f "$f" ] || { hint "site/.s2i/bin/run tidak ada di repo portal-s2i"; return 1; }
+  grep -v '^[[:space:]]*#' "$f" | grep -qE "SERVER_PORT=[\"']?8081[\"']?([[:space:];]|$)" &&
+  grep -v '^[[:space:]]*#' "$f" | grep -qE '(^|[[:space:];])export[[:space:]]+([A-Za-z_]+[^;]*[[:space:]])?SERVER_PORT' && return 0
+  hint "site/.s2i/bin/run belum berisi 'export SERVER_PORT=8081' (commit terakhir: $(git -C "$d" log -1 --format='%h %s'))"
+  return 1
+}
+q3_runtime() { # proses apa pun di container (tidak harus PID 1) punya SERVER_PORT=8081
+  oc logs -n deploy-portal deploy/portal-web 2>/dev/null | grep -q 'SERVER_PORT=8081' && return 0
+  oc exec -n deploy-portal deploy/portal-web -- sh -c 'cat /proc/[0-9]*/environ 2>/dev/null | tr "\0" "\n" | grep -qx SERVER_PORT=8081' && return 0
+  hint "tidak ada proses di container portal-web dengan SERVER_PORT=8081"; return 1
 }
 q3_http() {
   http_code "http://portal.$APPS/" 200 && http_code "https://portal.$APPS/" 200
@@ -243,7 +289,7 @@ grade_q3() {
   check 3 S2I 3 "Source repo portal-s2i, context site" q3_src
   check 3 CMS 3 "Git secret terpasang sebagai sourceSecret" jp_nonempty $ns bc/portal-web '{.spec.source.sourceSecret.name}'
   check 3 S2I 3 "SERVER_PORT tidak di-set lewat env BuildConfig/Deployment" q3_no_env
-  check 3 S2I 5 "S2I run script di Git berisi export SERVER_PORT=8081" git_grep portal-s2i main site/.s2i/bin/run '^[[:space:]]*export[[:space:]]+SERVER_PORT=8081'
+  check 3 S2I 5 "S2I run script di Git men-export SERVER_PORT=8081" q3_runscript
   check 3 S2I 3 "Build terakhir Complete" build_complete $ns portal-web
   check 3 S2I 4 "Container berjalan dengan SERVER_PORT=8081" q3_runtime
   check 3 OCP 3 "Route edge + Allow di portal.$APPS" route_ok $ns portal-web "portal.$APPS" edge Allow
@@ -252,8 +298,13 @@ grade_q3() {
 
 # =================== SOAL 4 ===================
 q4_from() {
-  jp_eq deploy-docs bc/docs-site '{.spec.strategy.dockerStrategy.from.name}' httpd:2.4-ubi9 &&
-  jp_eq deploy-docs bc/docs-site '{.spec.strategy.dockerStrategy.from.namespace}' openshift
+  local k n ns
+  k="$(jp deploy-docs bc/docs-site '{.spec.strategy.dockerStrategy.from.kind}')"
+  n="$(jp deploy-docs bc/docs-site '{.spec.strategy.dockerStrategy.from.name}')"
+  ns="$(jp deploy-docs bc/docs-site '{.spec.strategy.dockerStrategy.from.namespace}')"
+  [ "$k" = ImageStreamTag ] && [ "$n" = httpd:2.4-ubi9 ] && [ "$ns" = openshift ] && return 0
+  [ "$k" = DockerImage ] && echo "$n" | grep -q '/openshift/httpd:2\.4-ubi9$' && return 0
+  hint "dockerStrategy.from = ${k:-kosong} ${ns:+$ns/}${n:-kosong}, harus ImageStreamTag openshift/httpd:2.4-ubi9"; return 1
 }
 q4_two_builds() {
   [ "$(oc get builds -n deploy-docs -l openshift.io/build-config.name=docs-site \
@@ -366,7 +417,7 @@ PY
 q6_bc() {
   jp_nonempty lion bc/shop-ui '{.spec.source.sourceSecret.name}' &&
   jp_eq lion bc/shop-ui '{.spec.source.git.ref}' v2 &&
-  jp_eq lion bc/shop-ui '{.spec.source.contextDir}' app &&
+  dir_eq lion bc/shop-ui '{.spec.source.contextDir}' app &&
   jp_eq lion bc/shop-ui '{.spec.output.to.name}' "$INT_REG/lion/shop-ui:latest"
 }
 q6_labels() {
@@ -464,9 +515,17 @@ grade_q8() {
 
 # =================== SOAL 9 ===================
 q9_order() {
-  jp_eq pipeline-lab pipeline/build-and-deploy '{.spec.tasks[*].name}' "fetch-source build-image deploy" &&
-  jp_eq pipeline-lab pipeline/build-and-deploy '{.spec.tasks[?(@.name=="build-image")].runAfter[*]}' fetch-source &&
-  jp_eq pipeline-lab pipeline/build-and-deploy '{.spec.tasks[?(@.name=="deploy")].runAfter[*]}' build-image
+  local names ra_b ra_d ra_f t
+  names=" $(jp pipeline-lab pipeline/build-and-deploy '{.spec.tasks[*].name}') "
+  for t in fetch-source build-image deploy; do
+    case "$names" in *" $t "*) ;; *) hint "task $t tidak ada di pipeline (task sekarang:$names)"; return 1;; esac
+  done
+  ra_f=" $(jp pipeline-lab pipeline/build-and-deploy '{.spec.tasks[?(@.name=="fetch-source")].runAfter[*]}') "
+  ra_b=" $(jp pipeline-lab pipeline/build-and-deploy '{.spec.tasks[?(@.name=="build-image")].runAfter[*]}') "
+  ra_d=" $(jp pipeline-lab pipeline/build-and-deploy '{.spec.tasks[?(@.name=="deploy")].runAfter[*]}') "
+  [ "$ra_f" = "  " ] || { hint "fetch-source tidak boleh punya runAfter (sekarang:$ra_f)"; return 1; }
+  case "$ra_b" in *" fetch-source "*) ;; *) hint "build-image runAfter harus memuat fetch-source (sekarang:$ra_b)"; return 1;; esac
+  case "$ra_d" in *" build-image "*) ;; *) hint "deploy runAfter harus memuat build-image (sekarang:$ra_d)"; return 1;; esac
 }
 q9_refs() {
   local t want
@@ -483,11 +542,17 @@ q9_gitsecret() {
   done
   return 1
 }
-q9_params() {
-  oc get pipelinerun -n pipeline-lab -o jsonpath='{range .items[*]}{.status.conditions[0].reason}|{range .spec.params[*]}{.name}={.value};{end}{"\n"}{end}' 2>/dev/null \
-    | grep -E '^(Succeeded|Completed)\|' \
-    | grep -F 'GIT_URL=https://git.ocp4.example.com/developer/tekton-web' \
-    | grep -qF 'GIT_REVISION=main;'
+q9_params() { # PipelineRun Succeeded dengan GIT_URL tekton-web; GIT_REVISION main (atau tidak diisi -> default main)
+  oc get pipelinerun -n pipeline-lab -o json 2>/dev/null | python3 -c '
+import json, sys
+for r in json.load(sys.stdin).get("items", []):
+    c = (r.get("status", {}).get("conditions") or [{}])[0]
+    if c.get("reason") not in ("Succeeded", "Completed"): continue
+    p = {x.get("name"): x.get("value") for x in r.get("spec", {}).get("params", [])}
+    if "developer/tekton-web" in str(p.get("GIT_URL", "")) and p.get("GIT_REVISION", "main") == "main":
+        sys.exit(0)
+sys.exit(1)' && return 0
+  hint "tidak ada PipelineRun Succeeded dengan GIT_URL .../developer/tekton-web.git dan GIT_REVISION main"; return 1
 }
 q9_run() {
   oc get pipelinerun -n pipeline-lab -o jsonpath='{range .items[*]}{.spec.pipelineRef.name} {.status.conditions[0].reason}{"\n"}{end}' 2>/dev/null \
@@ -573,13 +638,18 @@ count_complete_builds() {
 q11_bc() {
   jp_eq docker-app bc/myapp1-docker '{.spec.strategy.type}' Docker &&
   jp_has docker-app bc/myapp1-docker '{.spec.source.git.uri}' 'developer/myapp1-docker' &&
-  jp_eq docker-app bc/myapp1-docker '{.spec.source.contextDir}' apps/myapp1
+  dir_eq docker-app bc/myapp1-docker '{.spec.source.contextDir}' apps/myapp1
 }
 q11_dockerfile() {
   local d f; d="$(git_dir myapp1-docker main)" || return 1
   f="$d/apps/myapp1/Dockerfile"
-  ! grep -qE '^[[:space:]]*COPY[[:space:]]+src/?[[:space:]]+\./?[[:space:]]*$' "$f" &&
-  grep -qE '^[[:space:]]*COPY[[:space:]]+(src/?[[:space:]]+(\./)?src/?|\.[[:space:]]+\.?/?)[[:space:]]*$' "$f"
+  [ -f "$f" ] || { hint "apps/myapp1/Dockerfile tidak ada"; return 1; }
+  if grep -qiE '^[[:space:]]*COPY[[:space:]]+(\./)?src/?[[:space:]]+\.?/?[[:space:]]*$' "$f"; then
+    hint "Dockerfile masih 'COPY src .' (isi src jadi tercecer di WORKDIR, struktur Maven rusak)"; return 1
+  fi
+  # COPY src <tujuan berakhiran /src>, atau COPY . <WORKDIR>
+  grep -qiE '^[[:space:]]*COPY[[:space:]]+((--[a-z]+=[^[:space:]]+[[:space:]]+)*)((\./)?src/?[[:space:]]+[^[:space:]]*src/?|\.[[:space:]]+[^[:space:]]+)[[:space:]]*$' "$f" && return 0
+  hint "Dockerfile tidak menyalin src ke folder src (contoh: COPY src src)"; return 1
 }
 q11_logs() {
   local l; l="$(oc logs -n docker-app deploy/myapp1-docker 2>/dev/null)" || return 1
@@ -596,16 +666,21 @@ grade_q11() {
 }
 q11_endpoint() { # path diambil dari anotasi @Path di source Java repo
   local d ep; d="$(git_dir myapp1-docker main)" || return 1
-  ep="$(grep -rhoP '@Path\("\K[^"]+' "$d/apps/myapp1/src/main/java" 2>/dev/null | head -1)"
-  if [ -n "$ep" ]; then http_code "http://myapp1-docker-docker-app.$APPS/${ep#/}" 200
-  else http_ok_any "http://myapp1-docker-docker-app.$APPS/"; fi
+  local c
+  for ep in expenses $(grep -rhoP '@Path\("\K[^"{]+' "$d/apps/myapp1/src/main/java" 2>/dev/null | sort -u); do
+    c="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 15 "http://myapp1-docker-docker-app.$APPS/${ep#/}")"
+    [ "$c" = 200 ] && return 0
+  done
+  hint "endpoint REST tidak ada yang mengembalikan 200 (terakhir /${ep#/} -> $c)"; return 1
 }
 q11_ready_logs() { deploy_ready docker-app myapp1-docker && q11_logs; }
 
 # =================== SOAL 12 ===================
 q12_istag() {
-  exists greetings-app istag/greetings:1.0.1 &&
-  jp_has greetings-app istag/greetings:1.0.1 '{.image.dockerImageReference}' 'registry.ocp4.example.com:8443/developer/greetings'
+  exists greetings-app istag/greetings:1.0.1 || return 1
+  { jp greetings-app istag/greetings:1.0.1 '{.tag.from.name}'; echo; jp greetings-app istag/greetings:1.0.1 '{.image.dockerImageReference}'; } \
+    | grep -qF 'registry.ocp4.example.com:8443/developer/greetings' && return 0
+  hint "istag greetings:1.0.1 tidak berasal dari registry.ocp4.example.com:8443/developer/greetings"; return 1
 }
 q12_pullsecret() {
   local s
@@ -650,8 +725,10 @@ q13_assemble_info() {
 }
 q13_run() {
   local d; d="$(git_dir hello-s2i main)" || return 1
-  [ -f "$d/.s2i/bin/run" ] && git_mode_exec hello-s2i main .s2i/bin/run &&
-  grep -qE '^[[:space:]]*exec[[:space:]]+run-httpd[[:space:]]+-e[[:space:]]+debug' "$d/.s2i/bin/run"
+  [ -f "$d/.s2i/bin/run" ] || { hint ".s2i/bin/run tidak ada di repo hello-s2i"; return 1; }
+  git_mode_exec hello-s2i main .s2i/bin/run || { hint ".s2i/bin/run belum executable di Git (git update-index --chmod=+x)"; return 1; }
+  grep -qE "^[[:space:]]*exec[[:space:]]+[^[:space:]]*(run-httpd|httpd)([[:space:]].*)?[[:space:]]-e[[:space:]]*[\"']?debug" "$d/.s2i/bin/run" && return 0
+  hint ".s2i/bin/run harus 'exec run-httpd -e debug' (exec supaya httpd jadi PID 1)"; return 1
 }
 q13_debug_log() { oc logs -n builds-s2i deploy/hello-web 2>/dev/null | grep -q ':debug\]'; }
 grade_q13() {
@@ -670,12 +747,15 @@ grade_q13() {
 q14_parent_file() {
   local d f; d="$(git_dir site-images main)" || return 1
   f="$d/parent/Containerfile"
-  grep -qE '^[[:space:]]*ONBUILD[[:space:]]+COPY[[:space:]]+src/?[[:space:]]+/var/www/html/?' "$f" &&
-  [ "$(grep -cE '^[[:space:]]*RUN[[:space:]]' "$f")" -le 1 ]
+  [ -f "$f" ] || { hint "parent/Containerfile tidak ada"; return 1; }
+  grep -qiE '^[[:space:]]*ONBUILD[[:space:]]+COPY[[:space:]]+((--[a-z]+=[^[:space:]]+[[:space:]]+)*)(\./)?src/?\.?[[:space:]]+/var/www/html/?\.?[[:space:]]*$' "$f" \
+    || { hint "parent/Containerfile belum punya 'ONBUILD COPY src/ /var/www/html/'"; return 1; }
+  [ "$(grep -ciE '^[[:space:]]*RUN[[:space:]]' "$f")" -le 1 ] && return 0
+  hint "parent/Containerfile masih punya $(grep -ciE '^[[:space:]]*RUN[[:space:]]' "$f") instruksi RUN (maksimal 1)"; return 1
 }
 q14_parent_bc() {
   jp_eq production2 bc/site-base '{.spec.strategy.type}' Docker &&
-  jp_eq production2 bc/site-base '{.spec.source.contextDir}' parent &&
+  dir_eq production2 bc/site-base '{.spec.source.contextDir}' parent &&
   jp_eq production2 bc/site-base '{.spec.strategy.dockerStrategy.from.name}' httpd:2.4-ubi9
 }
 q14_layers() {
@@ -685,7 +765,7 @@ q14_layers() {
   [ "$base" -gt 0 ] && [ "$parent" -gt 0 ] && [ $(( parent - base )) -le 1 ]
 }
 q14_child() {
-  jp_eq production2 bc/site-child '{.spec.source.contextDir}' child &&
+  dir_eq production2 bc/site-child '{.spec.source.contextDir}' child &&
   jp_eq production2 bc/site-child '{.spec.strategy.dockerStrategy.from.name}' site-base:latest &&
   build_complete production2 site-child
 }
@@ -736,7 +816,7 @@ q16_two_builds() { [ "$(count_complete_builds java-builds vertx-site)" -ge 2 ]; 
 grade_q16() {
   local ns=java-builds
   check 16 S2I 4 "BuildConfig vertx-site: S2I openshift/redhat-openjdk18-openshift:1.8, repo vertx-site" q16_bc
-  check 16 S2I 5 "Build env MAVEN_MIRROR_URL = Nexus java" jp_eq $ns bc/vertx-site '{.spec.strategy.sourceStrategy.env[?(@.name=="MAVEN_MIRROR_URL")].value}' "http://nexus-infra.apps.ocp4.example.com/repository/java"
+  check 16 S2I 5 "Build env MAVEN_MIRROR_URL = Nexus java" url_eq $ns bc/vertx-site '{.spec.strategy.sourceStrategy.env[?(@.name=="MAVEN_MIRROR_URL")].value}' "http://nexus-infra.apps.ocp4.example.com/repository/java"
   check 16 S2I 5 "Runtime env JAVA_APP_JAR = vertx-site-1.0.0-SNAPSHOT-fat.jar" jp_eq $ns deploy/vertx-site '{.spec.template.spec.containers[0].env[?(@.name=="JAVA_APP_JAR")].value}' vertx-site-1.0.0-SNAPSHOT-fat.jar
   check 16 S2I 5 "Incremental build aktif di BuildConfig" jp_eq $ns bc/vertx-site '{.spec.strategy.sourceStrategy.incremental}' true
   check 16 S2I 4 "Minimal 2 build Complete" q16_two_builds
