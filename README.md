@@ -110,6 +110,8 @@ bash grade/grade.sh 3 7      # hanya soal tertentu
 
 Setiap soal bernilai 30 poin, dipecah menjadi beberapa pemeriksaan berbobot. Contohnya Soal 7: chart 2.1.0 di Git, release lab dan prod, jumlah Pod, limit/request, label, env, serta route dan TLS. Vonis lulus dihitung dari ujian inti Soal 1–10: batas 210/300 (70%), mengikuti EX288. Soal 11–16 dinilai terpisah (/180) sebagai latihan tambahan, dan total keseluruhan /480 ikut ditampilkan.
 
+Setiap pemeriksaan juga ditandai dengan salah satu dari 9 objective resmi EX288 (`OCP`, `MULTI`, `IMG`, `TRBL`, `IS`, `CMS`, `S2I`, `TPL`, `PIPE`). Di akhir, grader mencetak hasil dengan format yang sama seperti email hasil ujian Red Hat: *Passing score*, *Your score*, *Result: PASS / NO PASS*, dan *Performance on exam objectives* dalam persen. Jadi hasil latihan bisa langsung dibandingkan dengan laporan ujian asli. Objective yang tidak muncul di soal yang dinilai ditampilkan sebagai `-`.
+
 Cara kerja grader:
 
 - Login sebagai `admin` di KUBECONFIG sementara, jadi sesi `oc` milikmu tidak berubah. Grader hanya membaca, tidak mengubah apa pun.
@@ -122,9 +124,9 @@ Contoh potongan output:
 
 ```text
 Soal 7 - Helm lab + production
-  [PASS]  3 poin  Chart di Git: version 2.1.0 dan template me-render resources
-  [PASS]  2 poin  [lab] Release webstore-lab deployed di webstore-lab
-  [FAIL]  4 poin  [prod] Limit 500m/512Mi, request 250m/256Mi
+  [PASS]  3 poin  MULTI  Chart di Git: version 2.1.0 dan template me-render resources
+  [PASS]  2 poin  MULTI  [lab] Release webstore-lab deployed di webstore-lab
+  [FAIL]  4 poin  MULTI  [prod] Limit 500m/512Mi, request 250m/256Mi
   ...
   Subtotal: 26/30
 
@@ -134,7 +136,31 @@ Ringkasan
   Ujian inti (Soal 1-10)    254/300
   Soal tambahan (11-16)     150/180
   TOTAL                     404/480  (84%)
-  LULUS ujian inti (batas lulus 210/300)
+
+=================================================================
+ Hasil ala email Red Hat
+=================================================================
+
+The results of your EX288 practice exam are reported below.
+
+Exam domain number:   EX288 Practice Set 2 (Soal 1-10)
+Passing score:        210
+Your score:           254
+
+Result: PASS
+
+Performance on exam objectives:
+
+      OBJECTIVE: SCORE
+      Work with Red Hat OpenShift Container Platform: 88%
+      Deploy multi-container applications: 87%
+      Work with container images in OpenShift Container Platform: 100%
+      Troubleshoot application builds and deployment issues: 77%
+      Work with image streams: 100%
+      Work with configuration maps and secrets: 83%
+      Work with the source-to-image (S2I) framework: 81%
+      Work with templates: 73%
+      Work with OpenShift Pipelines: 79%
 ```
 
 Catatan:

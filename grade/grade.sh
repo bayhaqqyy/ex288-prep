@@ -53,17 +53,53 @@ TITLE=(
   "S2I Java: Maven mirror + incremental"
 )
 
-# check <soal> <poin> <deskripsi> <perintah...>
+# Objective ujian EX288 (urutan sama dengan laporan hasil resmi Red Hat)
+OBJ_KEYS=(OCP MULTI IMG TRBL IS CMS S2I TPL PIPE)
+declare -A OBJ_NAME=(
+  [OCP]="Work with Red Hat OpenShift Container Platform"
+  [MULTI]="Deploy multi-container applications"
+  [IMG]="Work with container images in OpenShift Container Platform"
+  [TRBL]="Troubleshoot application builds and deployment issues"
+  [IS]="Work with image streams"
+  [CMS]="Work with configuration maps and secrets"
+  [S2I]="Work with the source-to-image (S2I) framework"
+  [TPL]="Work with templates"
+  [PIPE]="Work with OpenShift Pipelines"
+)
+declare -A OSC OMX   # key: "<core|extra>:<OBJ>"
+
+# check <soal> <objective> <poin> <deskripsi> <perintah...>
 check() {
-  local q="$1" pts="$2" desc="$3"; shift 3
+  local q="$1" obj="$2" pts="$3" desc="$4" set=core; shift 4
+  [ "$q" -le 10 ] || set=extra
   MAXQ[$q]=$(( ${MAXQ[$q]:-0} + pts ))
+  OMX[$set:$obj]=$(( ${OMX[$set:$obj]:-0} + pts ))
   if "$@" >/dev/null 2>&1; then
     SCORE[$q]=$(( ${SCORE[$q]:-0} + pts ))
-    out "  ${G}[PASS]${N} $(printf '%2d' "$pts") poin  $desc"
+    OSC[$set:$obj]=$(( ${OSC[$set:$obj]:-0} + pts ))
+    out "  ${G}[PASS]${N} $(printf '%2d' "$pts") poin  $(printf '%-5s' "$obj")  $desc"
   else
     SCORE[$q]=$(( ${SCORE[$q]:-0} ))
-    out "  ${R}[FAIL]${N} $(printf '%2d' "$pts") poin  $desc"
+    OSC[$set:$obj]=$(( ${OSC[$set:$obj]:-0} ))
+    out "  ${R}[FAIL]${N} $(printf '%2d' "$pts") poin  $(printf '%-5s' "$obj")  $desc"
   fi
+}
+
+# objective_report <core|extra>: persentase per objective seperti email hasil EX288
+objective_report() {
+  local set="$1" k mx pct
+  out "Performance on exam objectives:"
+  out ""
+  out "      OBJECTIVE: SCORE"
+  for k in "${OBJ_KEYS[@]}"; do
+    mx="${OMX[$set:$k]:-0}"
+    if [ "$mx" -gt 0 ]; then
+      pct=$(( (OSC[$set:$k] * 100 + mx / 2) / mx ))
+      out "      ${OBJ_NAME[$k]}: ${pct}%"
+    else
+      out "      ${OBJ_NAME[$k]}: -"
+    fi
+  done
 }
 
 # ---------- helper ----------
@@ -131,15 +167,15 @@ q1_builder() {
 }
 grade_q1() {
   local ns=metrics-prod
-  check 1 4 "BuildConfig metrics-api: repo, branch release-v1, context apps/metrics" q1_bc
-  check 1 3 "Builder openshift/nodejs:18-ubi9" q1_builder
-  check 1 4 "Git secret terpasang sebagai sourceSecret BuildConfig" jp_nonempty $ns bc/metrics-api '{.spec.source.sourceSecret.name}'
-  check 1 3 "Build env npm_config_registry = Nexus" jp_eq $ns bc/metrics-api '{.spec.strategy.sourceStrategy.env[?(@.name=="npm_config_registry")].value}' "$NEXUS_NPM"
-  check 1 4 "package.json di Git valid, prom-client di dependencies (bukan devDependencies)" q1_git
-  check 1 3 "Build terakhir Complete" build_complete $ns metrics-api
-  check 1 3 "Deployment metrics-api Ready" deploy_ready $ns metrics-api
-  check 1 3 "Route edge + insecure Allow di metrics-api-metrics-prod.$APPS" route_ok $ns metrics-api "metrics-api-metrics-prod.$APPS" edge Allow
-  check 1 3 "HTTPS /metrics mengembalikan metrik Prometheus" http_has "https://metrics-api-metrics-prod.$APPS/metrics" "process_cpu"
+  check 1 S2I 4 "BuildConfig metrics-api: repo, branch release-v1, context apps/metrics" q1_bc
+  check 1 S2I 3 "Builder openshift/nodejs:18-ubi9" q1_builder
+  check 1 CMS 4 "Git secret terpasang sebagai sourceSecret BuildConfig" jp_nonempty $ns bc/metrics-api '{.spec.source.sourceSecret.name}'
+  check 1 S2I 3 "Build env npm_config_registry = Nexus" jp_eq $ns bc/metrics-api '{.spec.strategy.sourceStrategy.env[?(@.name=="npm_config_registry")].value}' "$NEXUS_NPM"
+  check 1 TRBL 4 "package.json di Git valid, prom-client di dependencies (bukan devDependencies)" q1_git
+  check 1 TRBL 3 "Build terakhir Complete" build_complete $ns metrics-api
+  check 1 OCP 3 "Deployment metrics-api Ready" deploy_ready $ns metrics-api
+  check 1 OCP 3 "Route edge + insecure Allow di metrics-api-metrics-prod.$APPS" route_ok $ns metrics-api "metrics-api-metrics-prod.$APPS" edge Allow
+  check 1 TRBL 3 "HTTPS /metrics mengembalikan metrik Prometheus" http_has "https://metrics-api-metrics-prod.$APPS/metrics" "process_cpu"
 }
 
 # =================== SOAL 2 ===================
@@ -158,14 +194,14 @@ q2_dockerfile() {
 }
 grade_q2() {
   local ns=legacy-prod
-  check 2 4 "BuildConfig legacy-web: Docker strategy, repo legacy-web, context apps/legacy" q2_bc
-  check 2 4 "Docker build env npm_config_registry = Nexus" jp_eq $ns bc/legacy-web '{.spec.strategy.dockerStrategy.env[?(@.name=="npm_config_registry")].value}' "$NEXUS_NPM"
-  check 2 5 "Dockerfile di Git: USER non-root, tanpa port 80, port 8080" q2_dockerfile
-  check 2 3 "Build terakhir Complete" build_complete $ns legacy-web
-  check 2 4 "Deployment env APP_ENV=legacy-prod" jp_eq $ns deploy/legacy-web '{.spec.template.spec.containers[0].env[?(@.name=="APP_ENV")].value}' legacy-prod
-  check 2 3 "Deployment legacy-web Ready" deploy_ready $ns legacy-web
-  check 2 3 "Route hostname default legacy-web-legacy-prod.$APPS" route_ok $ns legacy-web "legacy-web-legacy-prod.$APPS" - -
-  check 2 4 "Aplikasi menampilkan 'mode: legacy-prod'" http_has "http://legacy-web-legacy-prod.$APPS/" "mode: legacy-prod"
+  check 2 OCP 4 "BuildConfig legacy-web: Docker strategy, repo legacy-web, context apps/legacy" q2_bc
+  check 2 TRBL 4 "Docker build env npm_config_registry = Nexus" jp_eq $ns bc/legacy-web '{.spec.strategy.dockerStrategy.env[?(@.name=="npm_config_registry")].value}' "$NEXUS_NPM"
+  check 2 TRBL 5 "Dockerfile di Git: USER non-root, tanpa port 80, port 8080" q2_dockerfile
+  check 2 TRBL 3 "Build terakhir Complete" build_complete $ns legacy-web
+  check 2 TRBL 4 "Deployment env APP_ENV=legacy-prod" jp_eq $ns deploy/legacy-web '{.spec.template.spec.containers[0].env[?(@.name=="APP_ENV")].value}' legacy-prod
+  check 2 OCP 3 "Deployment legacy-web Ready" deploy_ready $ns legacy-web
+  check 2 OCP 3 "Route hostname default legacy-web-legacy-prod.$APPS" route_ok $ns legacy-web "legacy-web-legacy-prod.$APPS" - -
+  check 2 OCP 4 "Aplikasi menampilkan 'mode: legacy-prod'" http_has "http://legacy-web-legacy-prod.$APPS/" "mode: legacy-prod"
 }
 
 # =================== SOAL 3 ===================
@@ -191,15 +227,15 @@ q3_http() {
 }
 grade_q3() {
   local ns=deploy-portal
-  check 3 3 "Builder openshift/httpd:2.4-ubi9 (Source strategy)" q3_builder
-  check 3 3 "Source repo portal-s2i, context site" q3_src
-  check 3 3 "Git secret terpasang sebagai sourceSecret" jp_nonempty $ns bc/portal-web '{.spec.source.sourceSecret.name}'
-  check 3 3 "SERVER_PORT tidak di-set lewat env BuildConfig/Deployment" q3_no_env
-  check 3 5 "S2I run script di Git berisi export SERVER_PORT=8081" git_grep portal-s2i main site/.s2i/bin/run '^[[:space:]]*export[[:space:]]+SERVER_PORT=8081'
-  check 3 3 "Build terakhir Complete" build_complete $ns portal-web
-  check 3 4 "Container berjalan dengan SERVER_PORT=8081" q3_runtime
-  check 3 3 "Route edge + Allow di portal.$APPS" route_ok $ns portal-web "portal.$APPS" edge Allow
-  check 3 3 "HTTP dan HTTPS sama-sama 200" q3_http
+  check 3 S2I 3 "Builder openshift/httpd:2.4-ubi9 (Source strategy)" q3_builder
+  check 3 S2I 3 "Source repo portal-s2i, context site" q3_src
+  check 3 CMS 3 "Git secret terpasang sebagai sourceSecret" jp_nonempty $ns bc/portal-web '{.spec.source.sourceSecret.name}'
+  check 3 S2I 3 "SERVER_PORT tidak di-set lewat env BuildConfig/Deployment" q3_no_env
+  check 3 S2I 5 "S2I run script di Git berisi export SERVER_PORT=8081" git_grep portal-s2i main site/.s2i/bin/run '^[[:space:]]*export[[:space:]]+SERVER_PORT=8081'
+  check 3 S2I 3 "Build terakhir Complete" build_complete $ns portal-web
+  check 3 S2I 4 "Container berjalan dengan SERVER_PORT=8081" q3_runtime
+  check 3 OCP 3 "Route edge + Allow di portal.$APPS" route_ok $ns portal-web "portal.$APPS" edge Allow
+  check 3 OCP 3 "HTTP dan HTTPS sama-sama 200" q3_http
 }
 
 # =================== SOAL 4 ===================
@@ -214,13 +250,13 @@ q4_two_builds() {
 q4_one_bc() { [ "$(oc get bc -n deploy-docs -o name 2>/dev/null | wc -l)" -eq 1 ]; }
 grade_q4() {
   local ns=deploy-docs
-  check 4 5 "BuildConfig docs-site bertipe source Binary" jp_eq $ns bc/docs-site '{.spec.source.type}' Binary
-  check 4 5 "Docker strategy memakai openshift/httpd:2.4-ubi9" q4_from
-  check 4 5 "Minimal 2 build Complete (v1 dan v2)" q4_two_builds
-  check 4 3 "Hanya satu BuildConfig di project" q4_one_bc
-  check 4 3 "Deployment docs-site Ready" deploy_ready $ns docs-site
-  check 4 3 "Route hostname default docs-site-deploy-docs.$APPS" route_ok $ns docs-site "docs-site-deploy-docs.$APPS" - -
-  check 4 6 "Aplikasi menampilkan 'EX288 Docs Site v2'" http_has "http://docs-site-deploy-docs.$APPS/" "EX288 Docs Site v2"
+  check 4 OCP 5 "BuildConfig docs-site bertipe source Binary" jp_eq $ns bc/docs-site '{.spec.source.type}' Binary
+  check 4 OCP 5 "Docker strategy memakai openshift/httpd:2.4-ubi9" q4_from
+  check 4 OCP 5 "Minimal 2 build Complete (v1 dan v2)" q4_two_builds
+  check 4 OCP 3 "Hanya satu BuildConfig di project" q4_one_bc
+  check 4 OCP 3 "Deployment docs-site Ready" deploy_ready $ns docs-site
+  check 4 OCP 3 "Route hostname default docs-site-deploy-docs.$APPS" route_ok $ns docs-site "docs-site-deploy-docs.$APPS" - -
+  check 4 OCP 6 "Aplikasi menampilkan 'EX288 Docs Site v2'" http_has "http://docs-site-deploy-docs.$APPS/" "EX288 Docs Site v2"
 }
 
 # =================== SOAL 5 ===================
@@ -245,13 +281,13 @@ q5_podname() {
 q5_log() { oc logs -n inventory deploy/inventory-api --tail=3 2>/dev/null | tail -1 | grep -q 'DB connection OK'; }
 grade_q5() {
   local ns=inventory
-  check 5 5 "ConfigMap inventory-db-config berisi DB_HOST, DB_USER, DB_NAME yang benar" q5_cm
-  check 5 3 "Secret inventory-db-secret key database-password = Inv3nt0ry" q5_secret
-  check 5 5 "Deployment memakai envFrom configMapRef inventory-db-config" jp_has $ns deploy/inventory-api '{.spec.template.spec.containers[0].envFrom[*].configMapRef.name}' inventory-db-config
-  check 5 5 "Env DB_PASSWORD dari secretKeyRef inventory-db-secret/database-password" q5_pwd
-  check 5 5 "Env POD_NAME dari fieldRef metadata.name dan sama dengan nama Pod" q5_podname
-  check 5 2 "Deployment inventory-api Ready" deploy_ready $ns inventory-api
-  check 5 5 "Log terakhir inventory-api: DB connection OK" q5_log
+  check 5 CMS 5 "ConfigMap inventory-db-config berisi DB_HOST, DB_USER, DB_NAME yang benar" q5_cm
+  check 5 CMS 3 "Secret inventory-db-secret key database-password = Inv3nt0ry" q5_secret
+  check 5 CMS 5 "Deployment memakai envFrom configMapRef inventory-db-config" jp_has $ns deploy/inventory-api '{.spec.template.spec.containers[0].envFrom[*].configMapRef.name}' inventory-db-config
+  check 5 CMS 5 "Env DB_PASSWORD dari secretKeyRef inventory-db-secret/database-password" q5_pwd
+  check 5 CMS 5 "Env POD_NAME dari fieldRef metadata.name dan sama dengan nama Pod" q5_podname
+  check 5 OCP 2 "Deployment inventory-api Ready" deploy_ready $ns inventory-api
+  check 5 CMS 5 "Log terakhir inventory-api: DB connection OK" q5_log
 }
 
 # =================== SOAL 6 ===================
@@ -279,16 +315,16 @@ q6_labels() {
 }
 grade_q6() {
   local ns=lion
-  check 6 4 "Build template: parameter wajib REGISTRY_URL 'My shop image registry'" q6_param templates/shop-build.yaml REGISTRY_URL "My shop image registry"
-  check 6 3 "Build template: parameter GIT_SECRET dipakai sebagai sourceSecret" q6_secret_tpl
-  check 6 2 "Build template punya label template: shop-ui" git_grep shop-ui v2 templates/shop-build.yaml 'template:[[:space:]]*shop-ui'
-  check 6 4 "BuildConfig shop-ui: secret, branch v2, context app, output ke $INT_REG/lion/shop-ui:latest" q6_bc
-  check 6 3 "Build terakhir Complete" build_complete $ns shop-ui
-  check 6 3 "Deployment shop-ui 2 replica Ready" deploy_ready $ns shop-ui 2
-  check 6 2 "Env BACKEND_URL benar" jp_eq $ns deploy/shop-ui '{.spec.template.spec.containers[0].env[?(@.name=="BACKEND_URL")].value}' "https://shop-api-lion.$APPS/"
-  check 6 3 "Route edge di shop-ui-lion.$APPS" route_ok $ns shop-ui "shop-ui-lion.$APPS" edge -
-  check 6 4 "bc, deploy, svc, route terpilih oleh app=shop-ui,tier=frontend" q6_labels
-  check 6 2 "Frontend merespons via HTTPS" http_has "https://shop-ui-lion.$APPS/" "shop-ui frontend"
+  check 6 TPL 4 "Build template: parameter wajib REGISTRY_URL 'My shop image registry'" q6_param templates/shop-build.yaml REGISTRY_URL "My shop image registry"
+  check 6 CMS 3 "Build template: parameter GIT_SECRET dipakai sebagai sourceSecret" q6_secret_tpl
+  check 6 TPL 2 "Build template punya label template: shop-ui" git_grep shop-ui v2 templates/shop-build.yaml 'template:[[:space:]]*shop-ui'
+  check 6 TPL 4 "BuildConfig shop-ui: secret, branch v2, context app, output ke $INT_REG/lion/shop-ui:latest" q6_bc
+  check 6 TPL 3 "Build terakhir Complete" build_complete $ns shop-ui
+  check 6 OCP 3 "Deployment shop-ui 2 replica Ready" deploy_ready $ns shop-ui 2
+  check 6 TPL 2 "Env BACKEND_URL benar" jp_eq $ns deploy/shop-ui '{.spec.template.spec.containers[0].env[?(@.name=="BACKEND_URL")].value}' "https://shop-api-lion.$APPS/"
+  check 6 OCP 3 "Route edge di shop-ui-lion.$APPS" route_ok $ns shop-ui "shop-ui-lion.$APPS" edge -
+  check 6 OCP 4 "bc, deploy, svc, route terpilih oleh app=shop-ui,tier=frontend" q6_labels
+  check 6 OCP 2 "Frontend merespons via HTTPS" http_has "https://shop-ui-lion.$APPS/" "shop-ui frontend"
 }
 
 # =================== SOAL 7 ===================
@@ -312,18 +348,18 @@ q7_chartlabel() {
   jp_eq webstore-prod deploy/webstore-prod '{.metadata.labels.chart}' webstore-2.1.0
 }
 grade_q7() {
-  check 7 3 "Chart di Git: version 2.1.0 dan template me-render resources" q7_chart
-  check 7 2 "[lab] Release webstore-lab deployed di webstore-lab" q7_release webstore-lab webstore-lab
-  check 7 2 "[lab] 2 Pod Ready" deploy_ready webstore-lab webstore-lab 2
-  check 7 3 "[lab] Limit CPU 200m, memory 256Mi" q7_res webstore-lab 200m 256Mi
-  check 7 2 "[lab] Label stage=lab dan APP_ENV=lab" q7_meta webstore-lab lab lab
-  check 7 3 "[lab] Route webstore-lab.$APPS edge + Allow" route_ok webstore-lab webstore-lab "webstore-lab.$APPS" edge Allow
-  check 7 2 "[prod] Release webstore-prod deployed di webstore-prod" q7_release webstore-prod webstore-prod
-  check 7 2 "[prod] 4 Pod Ready" deploy_ready webstore-prod webstore-prod 4
-  check 7 4 "[prod] Limit 500m/512Mi, request 250m/256Mi" q7_res webstore-prod 500m 512Mi 250m 256Mi
-  check 7 2 "[prod] Label stage=production dan APP_ENV=production" q7_meta webstore-prod production production
-  check 7 3 "[prod] Route webstore.$APPS edge + Redirect" route_ok webstore-prod webstore-prod "webstore.$APPS" edge Redirect
-  check 7 2 "Kedua Deployment berlabel chart=webstore-2.1.0" q7_chartlabel
+  check 7 MULTI 3 "Chart di Git: version 2.1.0 dan template me-render resources" q7_chart
+  check 7 MULTI 2 "[lab] Release webstore-lab deployed di webstore-lab" q7_release webstore-lab webstore-lab
+  check 7 MULTI 2 "[lab] 2 Pod Ready" deploy_ready webstore-lab webstore-lab 2
+  check 7 MULTI 3 "[lab] Limit CPU 200m, memory 256Mi" q7_res webstore-lab 200m 256Mi
+  check 7 MULTI 2 "[lab] Label stage=lab dan APP_ENV=lab" q7_meta webstore-lab lab lab
+  check 7 MULTI 3 "[lab] Route webstore-lab.$APPS edge + Allow" route_ok webstore-lab webstore-lab "webstore-lab.$APPS" edge Allow
+  check 7 MULTI 2 "[prod] Release webstore-prod deployed di webstore-prod" q7_release webstore-prod webstore-prod
+  check 7 MULTI 2 "[prod] 4 Pod Ready" deploy_ready webstore-prod webstore-prod 4
+  check 7 MULTI 4 "[prod] Limit 500m/512Mi, request 250m/256Mi" q7_res webstore-prod 500m 512Mi 250m 256Mi
+  check 7 MULTI 2 "[prod] Label stage=production dan APP_ENV=production" q7_meta webstore-prod production production
+  check 7 MULTI 3 "[prod] Route webstore.$APPS edge + Redirect" route_ok webstore-prod webstore-prod "webstore.$APPS" edge Redirect
+  check 7 MULTI 2 "Kedua Deployment berlabel chart=webstore-2.1.0" q7_chartlabel
 }
 
 # =================== SOAL 8 ===================
@@ -350,11 +386,11 @@ q8_readiness() {
   jp_eq deploy-health deploy/health-app "$P8.readinessProbe.failureThreshold}" 3
 }
 grade_q8() {
-  check 8 8 "Startup probe: HTTP / 8080, period 5, failure 12" q8_startup
-  check 8 8 "Liveness probe: TCP 8080, delay 15, period 10, timeout 3, failure 3" q8_liveness
-  check 8 8 "Readiness probe: HTTP / 8080, period 10, timeout 2, success 2, failure 3" q8_readiness
-  check 8 3 "Deployment health-app Ready" deploy_ready deploy-health health-app
-  check 8 3 "Route health-app merespons 200" http_code "http://health-app-deploy-health.$APPS/" 200
+  check 8 OCP 8 "Startup probe: HTTP / 8080, period 5, failure 12" q8_startup
+  check 8 OCP 8 "Liveness probe: TCP 8080, delay 15, period 10, timeout 3, failure 3" q8_liveness
+  check 8 OCP 8 "Readiness probe: HTTP / 8080, period 10, timeout 2, success 2, failure 3" q8_readiness
+  check 8 OCP 3 "Deployment health-app Ready" deploy_ready deploy-health health-app
+  check 8 OCP 3 "Route health-app merespons 200" http_code "http://health-app-deploy-health.$APPS/" 200
 }
 
 # =================== SOAL 9 ===================
@@ -414,20 +450,20 @@ q9_triggered() {
 }
 grade_q9() {
   local ns=pipeline-lab
-  check 9 2 "Pipeline build-and-deploy ada" exists $ns pipeline/build-and-deploy
-  check 9 3 "Urutan task fetch-source -> build-image -> deploy" q9_order
-  check 9 3 "Task diambil dari cluster resolver: git-clone, buildah, openshift-client" q9_refs
-  check 9 2 "Git secret beranotasi tekton.dev/git-* ter-link ke SA pipeline" q9_gitsecret
-  check 9 3 "PipelineRun build-and-deploy Succeeded" q9_run
-  check 9 2 "PipelineRun memakai GIT_URL tekton-web.git dan GIT_REVISION main" q9_params
-  check 9 2 "ImageStreamTag tekton-web:latest ada" exists $ns istag/tekton-web:latest
-  check 9 3 "Deployment tekton-web Ready dengan BUILT_BY=tekton" pod_env $ns tekton-web BUILT_BY tekton
-  check 9 2 "Route tekton-web merespons 200" http_code "http://tekton-web-pipeline-lab.$APPS/" 200
-  check 9 2 "[trigger] TriggerBinding tekton-web-binding: git-url dan git-revision dari body" q9_tb
-  check 9 2 "[trigger] TriggerTemplate tekton-web-template membuat PipelineRun build-and-deploy" q9_tt
-  check 9 2 "[trigger] EventListener tekton-web-listener Ready, SA pipeline, pakai binding+template" q9_el
-  check 9 1 "[trigger] Route ke service el-tekton-web-listener ada" q9_el_route
-  check 9 1 "[trigger] PipelineRun dari EventListener Succeeded" q9_triggered
+  check 9 PIPE 2 "Pipeline build-and-deploy ada" exists $ns pipeline/build-and-deploy
+  check 9 PIPE 3 "Urutan task fetch-source -> build-image -> deploy" q9_order
+  check 9 PIPE 3 "Task diambil dari cluster resolver: git-clone, buildah, openshift-client" q9_refs
+  check 9 PIPE 2 "Git secret beranotasi tekton.dev/git-* ter-link ke SA pipeline" q9_gitsecret
+  check 9 PIPE 3 "PipelineRun build-and-deploy Succeeded" q9_run
+  check 9 PIPE 2 "PipelineRun memakai GIT_URL tekton-web.git dan GIT_REVISION main" q9_params
+  check 9 IS 2 "ImageStreamTag tekton-web:latest ada" exists $ns istag/tekton-web:latest
+  check 9 PIPE 3 "Deployment tekton-web Ready dengan BUILT_BY=tekton" pod_env $ns tekton-web BUILT_BY tekton
+  check 9 PIPE 2 "Route tekton-web merespons 200" http_code "http://tekton-web-pipeline-lab.$APPS/" 200
+  check 9 PIPE 2 "[trigger] TriggerBinding tekton-web-binding: git-url dan git-revision dari body" q9_tb
+  check 9 PIPE 2 "[trigger] TriggerTemplate tekton-web-template membuat PipelineRun build-and-deploy" q9_tt
+  check 9 PIPE 2 "[trigger] EventListener tekton-web-listener Ready, SA pipeline, pakai binding+template" q9_el
+  check 9 PIPE 1 "[trigger] Route ke service el-tekton-web-listener ada" q9_el_route
+  check 9 PIPE 1 "[trigger] PipelineRun dari EventListener Succeeded" q9_triggered
 }
 
 # =================== SOAL 10 ===================
@@ -436,13 +472,13 @@ q10_img_env() {
 }
 grade_q10() {
   local ns=registry-lab
-  check 10 6 "Internal registry: defaultRoute true" jp_eq openshift-image-registry configs.imageregistry.operator.openshift.io/cluster '{.spec.defaultRoute}' true
-  check 10 3 "Route default-route ada di openshift-image-registry" exists openshift-image-registry route/default-route
-  check 10 6 "ImageStreamTag custom-nginx:1.0 ada di registry-lab" exists $ns istag/custom-nginx:1.0
-  check 10 3 "Image berasal dari Containerfile (env APP_TIER=registry-lab)" q10_img_env
-  check 10 4 "Deployment custom-nginx Ready" deploy_ready $ns custom-nginx
-  check 10 4 "Pod custom-nginx punya APP_TIER=registry-lab" pod_env $ns custom-nginx APP_TIER registry-lab
-  check 10 4 "Route custom-nginx merespons 200" http_code "http://custom-nginx-registry-lab.$APPS/" 200
+  check 10 IMG 6 "Internal registry: defaultRoute true" jp_eq openshift-image-registry configs.imageregistry.operator.openshift.io/cluster '{.spec.defaultRoute}' true
+  check 10 IMG 3 "Route default-route ada di openshift-image-registry" exists openshift-image-registry route/default-route
+  check 10 IS 6 "ImageStreamTag custom-nginx:1.0 ada di registry-lab" exists $ns istag/custom-nginx:1.0
+  check 10 IMG 3 "Image berasal dari Containerfile (env APP_TIER=registry-lab)" q10_img_env
+  check 10 OCP 4 "Deployment custom-nginx Ready" deploy_ready $ns custom-nginx
+  check 10 IMG 4 "Pod custom-nginx punya APP_TIER=registry-lab" pod_env $ns custom-nginx APP_TIER registry-lab
+  check 10 OCP 4 "Route custom-nginx merespons 200" http_code "http://custom-nginx-registry-lab.$APPS/" 200
 }
 
 # =================== helper tambahan ===================
@@ -482,12 +518,12 @@ q11_logs() {
 }
 grade_q11() {
   local ns=docker-app
-  check 11 4 "BuildConfig myapp1-docker: Docker strategy, repo myapp1-docker, context apps/myapp1" q11_bc
-  check 11 6 "Dockerfile di Git mempertahankan struktur src Maven (bukan 'COPY src .')" q11_dockerfile
-  check 11 4 "Build terakhir Complete" build_complete $ns myapp1-docker
-  check 11 6 "Deployment myapp1-docker Ready dan JAR ditemukan" q11_ready_logs
-  check 11 4 "Route hostname default myapp1-docker-docker-app.$APPS" route_ok $ns myapp1-docker "myapp1-docker-docker-app.$APPS" - -
-  check 11 6 "Endpoint REST aplikasi merespons 200 lewat route (source Java ter-compile)" q11_endpoint
+  check 11 OCP 4 "BuildConfig myapp1-docker: Docker strategy, repo myapp1-docker, context apps/myapp1" q11_bc
+  check 11 TRBL 6 "Dockerfile di Git mempertahankan struktur src Maven (bukan 'COPY src .')" q11_dockerfile
+  check 11 TRBL 4 "Build terakhir Complete" build_complete $ns myapp1-docker
+  check 11 OCP 6 "Deployment myapp1-docker Ready dan JAR ditemukan" q11_ready_logs
+  check 11 OCP 4 "Route hostname default myapp1-docker-docker-app.$APPS" route_ok $ns myapp1-docker "myapp1-docker-docker-app.$APPS" - -
+  check 11 OCP 6 "Endpoint REST aplikasi merespons 200 lewat route (source Java ter-compile)" q11_endpoint
 }
 q11_endpoint() { # path diambil dari anotasi @Path di source Java repo
   local d ep; d="$(git_dir myapp1-docker main)" || return 1
@@ -524,13 +560,13 @@ q12_deploy() {
 q12_logs() { oc logs -n greetings-app deploy/greetings 2>/dev/null | grep -q 'File cache OK'; }
 grade_q12() {
   local ns=greetings-app
-  check 12 4 "ImageStreamTag greetings:1.0.1 diimpor dari registry.ocp4.example.com:8443/developer/greetings" q12_istag
-  check 12 4 "Pull secret dockerconfigjson untuk registry.ocp4.example.com:8443 ada di project" q12_pullsecret
-  check 12 4 "Tag greetings:1.0.1 memakai referencePolicy Local" jp_eq $ns is/greetings '{.spec.tags[?(@.name=="1.0.1")].referencePolicy.type}' Local
-  check 12 5 "Image 1.0.1: USER non-root dan expose port 8080" q12_image_cfg
-  check 12 5 "Deployment greetings Ready memakai image dari image stream greetings:1.0.1" q12_deploy
-  check 12 4 "Log aplikasi: File cache OK (izin /var/cache benar)" q12_logs
-  check 12 4 "Route greetings-greetings-app.$APPS mengembalikan JSON greeting" http_has "http://greetings-greetings-app.$APPS/" '"greeting"'
+  check 12 IS 4 "ImageStreamTag greetings:1.0.1 diimpor dari registry.ocp4.example.com:8443/developer/greetings" q12_istag
+  check 12 CMS 4 "Pull secret dockerconfigjson untuk registry.ocp4.example.com:8443 ada di project" q12_pullsecret
+  check 12 IS 4 "Tag greetings:1.0.1 memakai referencePolicy Local" jp_eq $ns is/greetings '{.spec.tags[?(@.name=="1.0.1")].referencePolicy.type}' Local
+  check 12 IMG 5 "Image 1.0.1: USER non-root dan expose port 8080" q12_image_cfg
+  check 12 IS 5 "Deployment greetings Ready memakai image dari image stream greetings:1.0.1" q12_deploy
+  check 12 IMG 4 "Log aplikasi: File cache OK (izin /var/cache benar)" q12_logs
+  check 12 OCP 4 "Route greetings-greetings-app.$APPS mengembalikan JSON greeting" http_has "http://greetings-greetings-app.$APPS/" '"greeting"'
 }
 
 # =================== SOAL 13 ===================
@@ -551,14 +587,14 @@ q13_run() {
 q13_debug_log() { oc logs -n builds-s2i deploy/hello-web 2>/dev/null | grep -q ':debug\]'; }
 grade_q13() {
   local ns=builds-s2i
-  check 13 3 "BuildConfig hello-web: builder httpd:2.4-ubi9, repo hello-s2i" q13_bc
-  check 13 5 "assemble di Git executable (mode 100755)" git_mode_exec hello-s2i main .s2i/bin/assemble
-  check 13 5 "assemble membuat info.html (Page built on + HTTPD_VERSION)" q13_assemble_info
-  check 13 5 "run script ada, executable, memakai exec run-httpd -e debug" q13_run
-  check 13 3 "Build terakhir Complete" build_complete $ns hello-web
-  check 13 3 "Route hostname default hello-web-builds-s2i.$APPS" route_ok $ns hello-web "hello-web-builds-s2i.$APPS" - -
-  check 13 3 "/info.html berisi 'Page built on'" http_has "http://hello-web-builds-s2i.$APPS/info.html" "Page built on"
-  check 13 3 "Log httpd berlevel debug" q13_debug_log
+  check 13 S2I 3 "BuildConfig hello-web: builder httpd:2.4-ubi9, repo hello-s2i" q13_bc
+  check 13 S2I 5 "assemble di Git executable (mode 100755)" git_mode_exec hello-s2i main .s2i/bin/assemble
+  check 13 S2I 5 "assemble membuat info.html (Page built on + HTTPD_VERSION)" q13_assemble_info
+  check 13 S2I 5 "run script ada, executable, memakai exec run-httpd -e debug" q13_run
+  check 13 S2I 3 "Build terakhir Complete" build_complete $ns hello-web
+  check 13 OCP 3 "Route hostname default hello-web-builds-s2i.$APPS" route_ok $ns hello-web "hello-web-builds-s2i.$APPS" - -
+  check 13 S2I 3 "/info.html berisi 'Page built on'" http_has "http://hello-web-builds-s2i.$APPS/info.html" "Page built on"
+  check 13 S2I 3 "Log httpd berlevel debug" q13_debug_log
 }
 
 # =================== SOAL 14 ===================
@@ -586,14 +622,14 @@ q14_child() {
 }
 grade_q14() {
   local ns=production2
-  check 14 4 "Containerfile parent di Git: ONBUILD COPY src/ /var/www/html/ dan maksimal 1 RUN" q14_parent_file
-  check 14 4 "BuildConfig site-base: Docker, context parent, FROM openshift/httpd:2.4-ubi9" q14_parent_bc
-  check 14 3 "Build site-base terakhir Complete" build_complete $ns site-base
-  check 14 5 "Image site-base menambah maksimal 1 layer di atas base" q14_layers
-  check 14 4 "Image site-base menyimpan instruksi ONBUILD COPY" jp_has $ns istag/site-base:latest '{.image.dockerImageMetadata.Config.OnBuild}' 'COPY'
-  check 14 4 "BuildConfig site-child: context child, FROM site-base:latest, build Complete" q14_child
-  check 14 3 "Deployment site-child Ready" deploy_ready $ns site-child
-  check 14 3 "Route site-child-production2.$APPS menampilkan konten child" http_has "http://site-child-production2.$APPS/" "Child site from ONBUILD"
+  check 14 IMG 4 "Containerfile parent di Git: ONBUILD COPY src/ /var/www/html/ dan maksimal 1 RUN" q14_parent_file
+  check 14 IMG 4 "BuildConfig site-base: Docker, context parent, FROM openshift/httpd:2.4-ubi9" q14_parent_bc
+  check 14 IMG 3 "Build site-base terakhir Complete" build_complete $ns site-base
+  check 14 IMG 5 "Image site-base menambah maksimal 1 layer di atas base" q14_layers
+  check 14 IMG 4 "Image site-base menyimpan instruksi ONBUILD COPY" jp_has $ns istag/site-base:latest '{.image.dockerImageMetadata.Config.OnBuild}' 'COPY'
+  check 14 IMG 4 "BuildConfig site-child: context child, FROM site-base:latest, build Complete" q14_child
+  check 14 OCP 3 "Deployment site-child Ready" deploy_ready $ns site-child
+  check 14 OCP 3 "Route site-child-production2.$APPS menampilkan konten child" http_has "http://site-child-production2.$APPS/" "Child site from ONBUILD"
 }
 
 # =================== SOAL 15 ===================
@@ -612,13 +648,13 @@ q15_hook_log() {
 }
 grade_q15() {
   local ns=hooks-lab
-  check 15 5 "ConfigMap smoke-test berisi key smoke.py" q15_cm
-  check 15 5 "BuildConfig hooks-api memakai ConfigMap smoke-test sebagai build input" jp_has $ns bc/hooks-api '{.spec.source.configMaps[*].configMap.name}' smoke-test
-  check 15 6 "Post-commit build hook menjalankan smoke.py" q15_hook
-  check 15 4 "BuildConfig punya trigger Generic webhook" jp_has $ns bc/hooks-api '{.spec.triggers[*].type}' Generic
-  check 15 4 "Ada build Complete yang dipicu Generic WebHook" q15_webhook_build
-  check 15 4 "Log build terakhir berisi SMOKE TEST PASSED" q15_hook_log
-  check 15 2 "Route hooks-api merespons 200" http_code "http://hooks-api-hooks-lab.$APPS/" 200
+  check 15 CMS 5 "ConfigMap smoke-test berisi key smoke.py" q15_cm
+  check 15 CMS 5 "BuildConfig hooks-api memakai ConfigMap smoke-test sebagai build input" jp_has $ns bc/hooks-api '{.spec.source.configMaps[*].configMap.name}' smoke-test
+  check 15 S2I 6 "Post-commit build hook menjalankan smoke.py" q15_hook
+  check 15 S2I 4 "BuildConfig punya trigger Generic webhook" jp_has $ns bc/hooks-api '{.spec.triggers[*].type}' Generic
+  check 15 S2I 4 "Ada build Complete yang dipicu Generic WebHook" q15_webhook_build
+  check 15 S2I 4 "Log build terakhir berisi SMOKE TEST PASSED" q15_hook_log
+  check 15 OCP 2 "Route hooks-api merespons 200" http_code "http://hooks-api-hooks-lab.$APPS/" 200
 }
 
 # =================== SOAL 16 ===================
@@ -630,13 +666,13 @@ q16_bc() {
 q16_two_builds() { [ "$(count_complete_builds java-builds vertx-site)" -ge 2 ]; }
 grade_q16() {
   local ns=java-builds
-  check 16 4 "BuildConfig vertx-site: S2I openshift/redhat-openjdk18-openshift:1.8, repo vertx-site" q16_bc
-  check 16 5 "Build env MAVEN_MIRROR_URL = Nexus java" jp_eq $ns bc/vertx-site '{.spec.strategy.sourceStrategy.env[?(@.name=="MAVEN_MIRROR_URL")].value}' "http://nexus-infra.apps.ocp4.example.com/repository/java"
-  check 16 5 "Runtime env JAVA_APP_JAR = vertx-site-1.0.0-SNAPSHOT-fat.jar" jp_eq $ns deploy/vertx-site '{.spec.template.spec.containers[0].env[?(@.name=="JAVA_APP_JAR")].value}' vertx-site-1.0.0-SNAPSHOT-fat.jar
-  check 16 5 "Incremental build aktif di BuildConfig" jp_eq $ns bc/vertx-site '{.spec.strategy.sourceStrategy.incremental}' true
-  check 16 4 "Minimal 2 build Complete" q16_two_builds
-  check 16 3 "Deployment vertx-site Ready" deploy_ready $ns vertx-site
-  check 16 4 "Route vertx-site-java-builds.$APPS merespons 200" http_code "http://vertx-site-java-builds.$APPS/" 200
+  check 16 S2I 4 "BuildConfig vertx-site: S2I openshift/redhat-openjdk18-openshift:1.8, repo vertx-site" q16_bc
+  check 16 S2I 5 "Build env MAVEN_MIRROR_URL = Nexus java" jp_eq $ns bc/vertx-site '{.spec.strategy.sourceStrategy.env[?(@.name=="MAVEN_MIRROR_URL")].value}' "http://nexus-infra.apps.ocp4.example.com/repository/java"
+  check 16 S2I 5 "Runtime env JAVA_APP_JAR = vertx-site-1.0.0-SNAPSHOT-fat.jar" jp_eq $ns deploy/vertx-site '{.spec.template.spec.containers[0].env[?(@.name=="JAVA_APP_JAR")].value}' vertx-site-1.0.0-SNAPSHOT-fat.jar
+  check 16 S2I 5 "Incremental build aktif di BuildConfig" jp_eq $ns bc/vertx-site '{.spec.strategy.sourceStrategy.incremental}' true
+  check 16 S2I 4 "Minimal 2 build Complete" q16_two_builds
+  check 16 OCP 3 "Deployment vertx-site Ready" deploy_ready $ns vertx-site
+  check 16 OCP 4 "Route vertx-site-java-builds.$APPS merespons 200" http_code "http://vertx-site-java-builds.$APPS/" 200
 }
 
 # =================== MAIN ===================
@@ -671,14 +707,35 @@ out "  ---------------------------------------------"
 [ "$CORE_MAX" -gt 0 ]  && out "  ${B}$(printf 'Ujian inti (Soal 1-10)    %3d/%-3d' "$CORE" "$CORE_MAX")${N}"
 [ "$EXTRA_MAX" -gt 0 ] && out "  ${B}$(printf 'Soal tambahan (11-16)     %3d/%-3d' "$EXTRA" "$EXTRA_MAX")${N}"
 out "  ${B}$(printf 'TOTAL                     %3d/%-3d  (%d%%)' "$TOTAL" "$MAXT" $(( MAXT > 0 ? TOTAL * 100 / MAXT : 0 )))${N}"
+out ""
+out "${B}=================================================================${N}"
+out "${B} Hasil ala email Red Hat${N}"
+out "${B}=================================================================${N}"
+out ""
+out "The results of your EX288 practice exam are reported below."
+out ""
+out "Exam domain number:   EX288 Practice Set 2 (Soal 1-10)"
+out "Passing score:        $PASS_MARK"
+out "Your score:           $CORE"
+out ""
 if [ "$CORE_N" -eq 10 ]; then
   if [ "$CORE" -ge "$PASS_MARK" ]; then
-    out "  ${G}${B}LULUS${N} ujian inti (batas lulus $PASS_MARK/300)"
+    out "Result: ${G}${B}PASS${N}"
   else
-    out "  ${R}${B}BELUM LULUS${N} ujian inti (batas lulus $PASS_MARK/300, kurang $(( PASS_MARK - CORE )) poin)"
+    out "Result: ${R}${B}NO PASS${N}  (kurang $(( PASS_MARK - CORE )) poin)"
   fi
 else
-  out "  ${Y}Penilaian sebagian. Jalankan tanpa argumen (atau 1-10) untuk vonis lulus /300.${N}"
+  out "Result: ${Y}- (penilaian sebagian, jalankan tanpa argumen untuk vonis)${N}"
+fi
+out ""
+if [ "$CORE_MAX" -gt 0 ]; then
+  objective_report core
+fi
+if [ "$EXTRA_MAX" -gt 0 ]; then
+  out ""
+  out "${B}Latihan tambahan (Soal 11-16): $EXTRA/$EXTRA_MAX${N}"
+  out ""
+  objective_report extra
 fi
 out ""
 out "Laporan tersimpan di: $REPORT"
