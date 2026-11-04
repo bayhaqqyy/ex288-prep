@@ -481,7 +481,7 @@ curl health-app-deploy-health.apps.ocp4.example.com
 
 ## Kunci Soal 9
 
-Semua YAML sudah disediakan. Tugasnya menemukan nilai yang salah di `pipeline.yaml` dan `trigger-template.yaml`. Ada delapan nilai salah:
+Semua YAML sudah disediakan. Tugasnya menemukan nilai yang salah di `pipeline.yaml` dan `trigger-template.yaml`. Ada tujuh nilai salah:
 
 | File | Lokasi | Nilai salah | Nilai benar | Gejala kalau dibiarkan |
 | --- | --- | --- | --- | --- |
@@ -490,7 +490,6 @@ Semua YAML sudah disediakan. Tugasnya menemukan nilai yang salah di `pipeline.ya
 | `pipeline.yaml` | `build-image` → build arg | `MAVEN_REPO=$(params.MAVEN_MIRROR_URL)` | `MAVEN_MIRROR_URL=$(params.MAVEN_MIRROR_URL)` | build berhenti: `ERROR: build arg MAVEN_MIRROR_URL is not set` |
 | `pipeline.yaml` | param `MAVEN_MIRROR_URL` → `default` | `https://repo.maven.apache.org/maven2` | `http://nexus-infra.apps.ocp4.example.com/repository/java` | Maven timeout karena lab tidak punya akses internet |
 | `trigger-template.yaml` | `pipelineRef.name` | `maven-pipeline` | `maven-build-deploy` | PipelineRun dari trigger gagal: pipeline tidak ditemukan |
-| `trigger-template.yaml` | `taskRunTemplate.serviceAccountName` | `default` | `pipeline` | kredensial Git tidak terpakai, push image ditolak |
 | `trigger-template.yaml` | param `IMAGE` | `.../openshift/tekton-maven:latest` | `.../pipeline-lab/tekton-maven:latest` | push ditolak (`unauthorized`) ke namespace `openshift` |
 | `trigger-template.yaml` | `workspaces` → `claimName` | `maven-pvc` | `maven-workspace` | PipelineRun tertahan, PVC tidak ditemukan |
 
@@ -579,7 +578,7 @@ tkn pipelinerun logs --last -t build-image | grep -iE "error|MAVEN|mirror|Contai
       pipelineRef:
         name: maven-build-deploy          # <- diganti
       taskRunTemplate:
-        serviceAccountName: pipeline      # <- diganti
+        serviceAccountName: pipeline
       params:
       - name: GIT_URL
         value: $(tt.params.git-url)

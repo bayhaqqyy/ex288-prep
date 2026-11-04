@@ -454,7 +454,7 @@ spec:
       pipelineRef:
         name: maven-pipeline
       taskRunTemplate:
-        serviceAccountName: default
+        serviceAccountName: pipeline
       params:
       - name: GIT_URL
         value: $(tt.params.git-url)
