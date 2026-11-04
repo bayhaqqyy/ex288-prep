@@ -43,7 +43,7 @@ TITLE=(
   "Template build + deploy"
   "Helm lab + production"
   "Startup, liveness, readiness probe"
-  "OpenShift Pipelines (Tekton)"
+  "OpenShift Pipelines Maven: perbaiki YAML + trigger"
   "Expose internal registry + push"
   "Troubleshoot Docker build Maven"
   "Podman build + push + ImageStream"
@@ -514,89 +514,130 @@ grade_q8() {
 }
 
 # =================== SOAL 9 ===================
-q9_order() {
-  local names ra_b ra_d ra_f t
-  names=" $(jp pipeline-lab pipeline/build-and-deploy '{.spec.tasks[*].name}') "
-  for t in fetch-source build-image deploy; do
-    case "$names" in *" $t "*) ;; *) hint "task $t tidak ada di pipeline (task sekarang:$names)"; return 1;; esac
-  done
-  ra_f=" $(jp pipeline-lab pipeline/build-and-deploy '{.spec.tasks[?(@.name=="fetch-source")].runAfter[*]}') "
-  ra_b=" $(jp pipeline-lab pipeline/build-and-deploy '{.spec.tasks[?(@.name=="build-image")].runAfter[*]}') "
-  ra_d=" $(jp pipeline-lab pipeline/build-and-deploy '{.spec.tasks[?(@.name=="deploy")].runAfter[*]}') "
-  [ "$ra_f" = "  " ] || { hint "fetch-source tidak boleh punya runAfter (sekarang:$ra_f)"; return 1; }
-  case "$ra_b" in *" fetch-source "*) ;; *) hint "build-image runAfter harus memuat fetch-source (sekarang:$ra_b)"; return 1;; esac
-  case "$ra_d" in *" build-image "*) ;; *) hint "deploy runAfter harus memuat build-image (sekarang:$ra_d)"; return 1;; esac
-}
-q9_refs() {
-  local t want
-  for t in fetch-source:git-clone build-image:buildah deploy:openshift-client; do
-    want="${t#*:}"
-    jp_eq pipeline-lab pipeline/build-and-deploy "{.spec.tasks[?(@.name==\"${t%%:*}\")].taskRef.resolver}" cluster || return 1
-    jp_has pipeline-lab pipeline/build-and-deploy "{.spec.tasks[?(@.name==\"${t%%:*}\")].taskRef.params[*].value}" "$want" || return 1
-  done
+# Pipeline maven-build-deploy dan TriggerTemplate maven-template dibaca sebagai
+# JSON dari cluster; setiap nilai yang masih salah dilaporkan lewat hint.
+NEXUS_JAVA="http://nexus-infra.apps.ocp4.example.com/repository/java"
+Q9_IMAGE="$INT_REG/pipeline-lab/tekton-maven:latest"
+q9_py() { # <mode> : pipeline-mirror | pipeline-build | pipeline-rev | pipeline-flow | template
+  local kind name json msg
+  case "$1" in template) kind=triggertemplate; name=maven-template ;; *) kind=pipeline; name=maven-build-deploy ;; esac
+  json="$(oc get -n pipeline-lab "$kind/$name" -o json 2>/dev/null)" || { hint "$kind/$name tidak ada di pipeline-lab"; return 1; }
+  msg="$(printf '%s' "$json" | python3 -c '
+import json, re, sys
+mode, nexus, image = sys.argv[1], sys.argv[2].rstrip("/"), sys.argv[3]
+o = json.load(sys.stdin); err = []
+def task(name):
+    for t in o.get("spec", {}).get("tasks", []):
+        if t.get("name") == name: return t
+    err.append(f"task {name} tidak ada"); return {}
+def tparams(t): return {p.get("name"): p.get("value") for p in t.get("params", [])}
+if mode == "pipeline-mirror":
+    ps = {p.get("name"): p for p in o["spec"].get("params", [])}
+    d = str(ps.get("MAVEN_MIRROR_URL", {}).get("default", "")).rstrip("/")
+    if "MAVEN_MIRROR_URL" not in ps: err.append("param MAVEN_MIRROR_URL tidak ada di Pipeline")
+    elif d != nexus: err.append("default MAVEN_MIRROR_URL = %s, harus %s" % (d or "kosong", nexus))
+elif mode == "pipeline-build":
+    pr = tparams(task("build-image"))
+    df = str(pr.get("DOCKERFILE", "")).lstrip("./")
+    if df != "Containerfile": err.append("build-image DOCKERFILE = %s, harus ./Containerfile" % pr.get("DOCKERFILE"))
+    args = " ".join([str(pr.get("BUILD_EXTRA_ARGS", ""))] + [str(x) for x in (pr.get("BUILD_ARGS") or [])])
+    ok = re.search(r"(^|[\s=])MAVEN_MIRROR_URL=(\$\(params\.MAVEN_MIRROR_URL\)|" + re.escape(nexus) + r"/?)(\s|$)", args)
+    if not ok:
+        err.append("build arg sekarang [%s], harus MAVEN_MIRROR_URL=$(params.MAVEN_MIRROR_URL) (nama ARG di Containerfile)" % args.strip())
+elif mode == "pipeline-rev":
+    pr = tparams(task("fetch-source"))
+    v = pr.get("REVISION", pr.get("revision"))
+    if str(v).replace(" ", "") != "$(params.GIT_REVISION)":
+        err.append("fetch-source revision = %s, harus $(params.GIT_REVISION)" % v)
+elif mode == "pipeline-flow":
+    want = {"fetch-source": "git-clone", "build-image": "buildah", "deploy": "openshift-client"}
+    for n, tk in want.items():
+        t = task(n); ref = t.get("taskRef", {})
+        vals = [p.get("value") for p in ref.get("params", [])]
+        if t and (ref.get("resolver") != "cluster" or tk not in vals):
+            err.append("%s harus memakai task %s lewat cluster resolver" % (n, tk))
+    if task("fetch-source").get("runAfter"): err.append("fetch-source tidak boleh punya runAfter")
+    if "fetch-source" not in (task("build-image").get("runAfter") or []): err.append("build-image harus runAfter fetch-source")
+    if "build-image" not in (task("deploy").get("runAfter") or []): err.append("deploy harus runAfter build-image")
+elif mode == "template":
+    rt = (o.get("spec", {}).get("resourcetemplates") or [{}])[0]
+    sp = rt.get("spec", {})
+    ref = sp.get("pipelineRef", {}).get("name")
+    if ref != "maven-build-deploy": err.append("pipelineRef.name = %s, harus maven-build-deploy" % ref)
+    sa = (sp.get("taskRunTemplate") or {}).get("serviceAccountName") or sp.get("serviceAccountName")
+    if sa != "pipeline": err.append("serviceAccountName = %s, harus pipeline" % sa)
+    pr = {p.get("name"): str(p.get("value")) for p in sp.get("params", [])}
+    if pr.get("IMAGE") != image: err.append("IMAGE = %s, harus %s" % (pr.get("IMAGE"), image))
+    if "tt.params.git-url" not in pr.get("GIT_URL", ""): err.append("GIT_URL harus $(tt.params.git-url)")
+    if "tt.params.git-revision" not in pr.get("GIT_REVISION", ""): err.append("GIT_REVISION harus $(tt.params.git-revision)")
+    ws = {w.get("name"): w for w in sp.get("workspaces", [])}
+    claim = (ws.get("source", {}).get("persistentVolumeClaim") or {}).get("claimName")
+    if claim != "maven-workspace": err.append("workspace source claimName = %s, harus maven-workspace" % claim)
+if err:
+    print("\n".join(err)); sys.exit(1)
+' "$1" "$NEXUS_JAVA" "$Q9_IMAGE")" && return 0
+  while IFS= read -r l; do [ -n "$l" ] && hint "$l"; done <<< "$msg"
+  return 1
 }
 q9_gitsecret() {
   local s
   for s in $(jp pipeline-lab sa/pipeline '{.secrets[*].name}'); do
     oc get -n pipeline-lab secret "$s" -o jsonpath='{.metadata.annotations}' 2>/dev/null | grep -q 'tekton.dev/git-' && return 0
   done
-  return 1
+  hint "tidak ada secret beranotasi tekton.dev/git-* yang ter-link ke SA pipeline"; return 1
 }
-q9_params() { # PipelineRun Succeeded dengan GIT_URL tekton-web; GIT_REVISION main (atau tidak diisi -> default main)
+q9_run() { # PipelineRun maven-build-deploy Succeeded dari repo tekton-maven (manual atau trigger)
   oc get pipelinerun -n pipeline-lab -o json 2>/dev/null | python3 -c '
 import json, sys
 for r in json.load(sys.stdin).get("items", []):
     c = (r.get("status", {}).get("conditions") or [{}])[0]
-    if c.get("reason") not in ("Succeeded", "Completed"): continue
-    p = {x.get("name"): x.get("value") for x in r.get("spec", {}).get("params", [])}
-    if "developer/tekton-web" in str(p.get("GIT_URL", "")) and p.get("GIT_REVISION", "main") == "main":
+    p = {x.get("name"): str(x.get("value")) for x in r.get("spec", {}).get("params", [])}
+    if r.get("spec", {}).get("pipelineRef", {}).get("name") == "maven-build-deploy" \
+       and c.get("reason") in ("Succeeded", "Completed") and "developer/tekton-maven" in p.get("GIT_URL", ""):
         sys.exit(0)
 sys.exit(1)' && return 0
-  hint "tidak ada PipelineRun Succeeded dengan GIT_URL .../developer/tekton-web.git dan GIT_REVISION main"; return 1
+  local last
+  last="$(oc get pipelinerun -n pipeline-lab --sort-by=.metadata.creationTimestamp \
+    -o jsonpath='{range .items[*]}{.metadata.name} {.status.conditions[0].reason}{"\n"}{end}' 2>/dev/null | tail -1)"
+  hint "belum ada PipelineRun maven-build-deploy yang Succeeded${last:+ (terakhir: $last; cek: tkn pr logs ${last%% *})}"
+  return 1
 }
-q9_run() {
-  oc get pipelinerun -n pipeline-lab -o jsonpath='{range .items[*]}{.spec.pipelineRef.name} {.status.conditions[0].reason}{"\n"}{end}' 2>/dev/null \
-    | grep -qE '^build-and-deploy (Succeeded|Completed)$'
-}
-q9_tb() {
-  local names
-  names="$(jp pipeline-lab triggerbinding/tekton-web-binding '{.spec.params[*].name}')"
-  echo " $names " | grep -q ' git-url ' && echo " $names " | grep -q ' git-revision ' &&
-  jp_has pipeline-lab triggerbinding/tekton-web-binding '{.spec.params[?(@.name=="git-url")].value}' 'body.git_url' &&
-  jp_has pipeline-lab triggerbinding/tekton-web-binding '{.spec.params[?(@.name=="git-revision")].value}' 'body.revision'
-}
-q9_tt() {
-  jp_eq pipeline-lab triggertemplate/tekton-web-template '{.spec.resourcetemplates[0].spec.pipelineRef.name}' build-and-deploy &&
-  jp_has pipeline-lab triggertemplate/tekton-web-template '{.spec.resourcetemplates[0].spec.params[?(@.name=="GIT_URL")].value}' 'tt.params.git-url'
+q9_endpoint() {
+  local d ep c
+  d="$(git_dir tekton-maven main)" || return 1
+  for ep in expenses $(grep -rhoP '@Path\("\K[^"{]+' "$d/src/main/java" 2>/dev/null | sort -u); do
+    c="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 15 "http://tekton-maven-pipeline-lab.$APPS/${ep#/}")"
+    [ "$c" = 200 ] && return 0
+  done
+  hint "endpoint REST tekton-maven tidak ada yang 200 (terakhir /${ep#/} -> HTTP $c)"; return 1
 }
 q9_el() {
-  jp_eq pipeline-lab eventlistener/tekton-web-listener '{.spec.serviceAccountName}' pipeline &&
-  jp_has pipeline-lab eventlistener/tekton-web-listener '{.spec.triggers[*].bindings[*].ref}' tekton-web-binding &&
-  jp_has pipeline-lab eventlistener/tekton-web-listener '{.spec.triggers[*].template.ref}' tekton-web-template &&
-  jp_eq pipeline-lab eventlistener/tekton-web-listener '{.status.conditions[?(@.type=="Ready")].status}' True
-}
-q9_el_route() {
-  oc get route -n pipeline-lab -o jsonpath='{.items[*].spec.to.name}' 2>/dev/null | tr ' ' '\n' | grep -qx el-tekton-web-listener
+  jp_eq pipeline-lab eventlistener/maven-listener '{.status.conditions[?(@.type=="Ready")].status}' True || return 1
+  oc get route -n pipeline-lab -o jsonpath='{.items[*].spec.to.name}' 2>/dev/null | tr ' ' '\n' | grep -qx el-maven-listener && return 0
+  hint "belum ada route ke service el-maven-listener"; return 1
 }
 q9_triggered() {
-  oc get pipelinerun -n pipeline-lab -l triggers.tekton.dev/eventlistener=tekton-web-listener \
-    -o jsonpath='{range .items[*]}{.status.conditions[0].reason}{"\n"}{end}' 2>/dev/null | grep -qE '^(Succeeded|Completed)$'
+  oc get pipelinerun -n pipeline-lab -l triggers.tekton.dev/eventlistener=maven-listener \
+    -o jsonpath='{range .items[*]}{.status.conditions[0].reason}{"\n"}{end}' 2>/dev/null | grep -qE '^(Succeeded|Completed)$' && return 0
+  local n; n="$(oc get pipelinerun -n pipeline-lab -l triggers.tekton.dev/eventlistener=maven-listener -o name 2>/dev/null | wc -l)"
+  if [ "$n" -eq 0 ]; then hint "belum ada PipelineRun yang dibuat EventListener (sudah POST payload ke route?)"
+  else hint "$n PipelineRun dari EventListener, belum ada yang Succeeded (cek: tkn pr list)"; fi
+  return 1
 }
 grade_q9() {
   local ns=pipeline-lab
-  check 9 PIPE 2 "Pipeline build-and-deploy ada" exists $ns pipeline/build-and-deploy
-  check 9 PIPE 3 "Urutan task fetch-source -> build-image -> deploy" q9_order
-  check 9 PIPE 3 "Task diambil dari cluster resolver: git-clone, buildah, openshift-client" q9_refs
-  check 9 PIPE 2 "Git secret beranotasi tekton.dev/git-* ter-link ke SA pipeline" q9_gitsecret
-  check 9 PIPE 3 "PipelineRun build-and-deploy Succeeded" q9_run
-  check 9 PIPE 2 "PipelineRun memakai GIT_URL tekton-web.git dan GIT_REVISION main" q9_params
-  check 9 IS 2 "ImageStreamTag tekton-web:latest ada" exists $ns istag/tekton-web:latest
-  check 9 PIPE 3 "Deployment tekton-web Ready dengan BUILT_BY=tekton" pod_env $ns tekton-web BUILT_BY tekton
-  check 9 PIPE 2 "Route tekton-web merespons 200" http_code "http://tekton-web-pipeline-lab.$APPS/" 200
-  check 9 PIPE 2 "[trigger] TriggerBinding tekton-web-binding: git-url dan git-revision dari body" q9_tb
-  check 9 PIPE 2 "[trigger] TriggerTemplate tekton-web-template membuat PipelineRun build-and-deploy" q9_tt
-  check 9 PIPE 2 "[trigger] EventListener tekton-web-listener Ready, SA pipeline, pakai binding+template" q9_el
-  check 9 PIPE 1 "[trigger] Route ke service el-tekton-web-listener ada" q9_el_route
+  check 9 PIPE 2 "Pipeline maven-build-deploy ada" exists $ns pipeline/maven-build-deploy
+  check 9 PIPE 3 "Pipeline: default MAVEN_MIRROR_URL = Nexus java" q9_py pipeline-mirror
+  check 9 PIPE 4 "Pipeline: build-image pakai ./Containerfile + build arg MAVEN_MIRROR_URL" q9_py pipeline-build
+  check 9 PIPE 2 "Pipeline: fetch-source clone revision \$(params.GIT_REVISION)" q9_py pipeline-rev
+  check 9 PIPE 2 "Pipeline: urutan task + cluster resolver tetap benar" q9_py pipeline-flow
+  check 9 CMS 2 "Git secret beranotasi tekton.dev/git-* ter-link ke SA pipeline" q9_gitsecret
+  check 9 PIPE 3 "PipelineRun maven-build-deploy Succeeded" q9_run
+  check 9 IS 2 "ImageStreamTag tekton-maven:latest ada" exists $ns istag/tekton-maven:latest
+  check 9 PIPE 3 "Pod tekton-maven berjalan dengan BUILT_BY=tekton" pod_env $ns tekton-maven BUILT_BY tekton
+  check 9 OCP 2 "Endpoint REST tekton-maven merespons 200 lewat route default" q9_endpoint
+  check 9 PIPE 3 "[trigger] TriggerTemplate: pipelineRef, SA, IMAGE, PVC, param dari trigger" q9_py template
+  check 9 PIPE 1 "[trigger] EventListener maven-listener Ready + route el-maven-listener" q9_el
   check 9 PIPE 1 "[trigger] PipelineRun dari EventListener Succeeded" q9_triggered
 }
 

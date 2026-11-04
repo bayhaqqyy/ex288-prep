@@ -44,7 +44,7 @@ declare -A PROJECTS=(
 )
 declare -A REPOS=(
   [1]="metrics-api" [2]="legacy-web" [3]="portal-s2i" [6]="shop-ui"
-  [7]="webstore-helm" [9]="tekton-web" [11]="myapp1-docker" [13]="hello-s2i"
+  [7]="webstore-helm" [9]="tekton-maven" [11]="myapp1-docker" [13]="hello-s2i"
   [14]="site-images" [15]="hooks-api" [16]="vertx-site"
 )
 

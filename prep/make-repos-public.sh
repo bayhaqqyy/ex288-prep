@@ -11,13 +11,13 @@ set -u
 GIT_HOST="git.ocp4.example.com"
 GIT_USER="developer"
 GIT_PASS="d3v3lop3r"
-REPOS=(metrics-api legacy-web portal-s2i shop-ui webstore-helm tekton-web
+REPOS=(metrics-api legacy-web portal-s2i shop-ui webstore-helm tekton-maven
        myapp1-docker hello-s2i site-images hooks-api vertx-site)
 [ $# -gt 0 ] && REPOS=("$@")
 
 TOKEN="$(curl -sk --max-time 20 -X POST "https://${GIT_HOST}/oauth/token" \
   -d grant_type=password -d "username=${GIT_USER}" --data-urlencode "password=${GIT_PASS}" \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null)"
+  | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null || true)"
 if [ -z "$TOKEN" ]; then
   echo "Gagal mengambil token GitLab (password grant mungkin dimatikan)."
   echo "Ubah manual: buka https://${GIT_HOST}, masuk ke tiap project > Settings > General > Visibility > Public."

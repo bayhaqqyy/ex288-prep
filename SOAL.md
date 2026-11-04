@@ -156,44 +156,40 @@ In the project `deploy-health`, configure the `hello-world-nginx` container of t
 
 The old, wrong probe must not remain. The Pod must be `1/1 Running`, and the `health-app` route must respond.
 
-## Question 9 — Deploy with OpenShift Pipelines (Tekton)
+## Question 9 — Fix an OpenShift Pipelines build for a Maven application
 
-Preparation: `bash prep/prep-q9.sh` → creates the `tekton-web` repository and the skeleton `/home/student/ex288-set2/q9/pipeline-skeleton.yaml`
+Preparation: `bash prep/prep-q9.sh` → creates the `tekton-maven` repository and these files in `/home/student/ex288-set2/q9/`: `pvc.yaml`, `pipeline.yaml`, `pipelinerun.yaml`, `trigger-binding.yaml`, `trigger-template.yaml`, `trigger.yaml`, and `event-listener.yaml`.
 
 All work is done in the project `pipeline-lab`. Use these values exactly as written:
 
 | Item | Value |
 | --- | --- |
-| Git repository (`GIT_URL`) | `https://git.ocp4.example.com/developer/tekton-web.git` |
+| Git repository (`GIT_URL`) | `https://git.ocp4.example.com/developer/tekton-maven.git` |
 | Git revision (`GIT_REVISION`) | `main` |
 | Git credentials | `developer` / `d3v3lop3r` |
 | Build file | `Containerfile` at the repository root |
-| Built image (`IMAGE`) | `image-registry.openshift-image-registry.svc:5000/pipeline-lab/tekton-web:latest` |
-| Application name (`APP_NAME`) | `tekton-web` |
+| Maven mirror (`MAVEN_MIRROR_URL`) | `http://nexus-infra.apps.ocp4.example.com/repository/java` |
+| Built image (`IMAGE`) | `image-registry.openshift-image-registry.svc:5000/pipeline-lab/tekton-maven:latest` |
+| Application name (`APP_NAME`) | `tekton-maven` |
+| Pipeline | `maven-build-deploy` |
+| Workspace | PVC `maven-workspace` from `pvc.yaml` |
 | Service account | `pipeline` |
-| Task namespace | `openshift-pipelines` (cluster resolver) |
 
-- Create the Pipeline `build-and-deploy` from the skeleton with three sequential tasks: `fetch-source` (git-clone), `build-image` (buildah), and `deploy` (openshift-client).
-- `fetch-source` must clone `GIT_URL` at `GIT_REVISION` from the table.
-- `build-image` must build the `Containerfile` and push it to the image address in the table.
-- `deploy` must create the `tekton-web` Deployment, Service, and Route if they do not exist. If they already exist, it must restart the rollout.
+The provided files already define the whole pipeline and trigger setup, but `pipeline.yaml` and `trigger-template.yaml` contain wrong values. Fix only those two files. Do not change the application repository (`Containerfile`, `settings.xml`, `pom.xml`, or the Java sources).
+
+**Pipeline:**
+
+- `fetch-source` must clone `GIT_URL` at the revision given by the `GIT_REVISION` pipeline parameter, not a fixed branch.
+- `build-image` must build the repository's `Containerfile`.
+- The Maven build inside the `Containerfile` reads its mirror from a build argument. `build-image` must pass that build argument, taking the value from the `MAVEN_MIRROR_URL` pipeline parameter. The default value of `MAVEN_MIRROR_URL` must be the Maven mirror from the table.
 - The Git repository is private: the credentials must be stored as a secret and used by the `pipeline` service account.
-- The workspace must use a 1Gi PVC from a volumeClaimTemplate.
-- Run a PipelineRun with the `GIT_URL`, `GIT_REVISION`, `IMAGE`, and `APP_NAME` parameters from the table until it is `Succeeded`. The `tekton-web` Pod must be Running with the environment variable `BUILT_BY=tekton`.
+- Create the PVC, apply the Pipeline, and start `pipelinerun.yaml` until the PipelineRun is `Succeeded`. The `tekton-maven` Pod must be Running with the environment variable `BUILT_BY=tekton`, and the application's REST endpoint (for example `/expenses`) must return HTTP 200 through the default route hostname.
 
-**Trigger and EventListener** (Tekton Triggers):
+**Trigger:**
 
-| Item | Value |
-| --- | --- |
-| TriggerBinding | `tekton-web-binding`, param `git-url` from `$(body.git_url)` and `git-revision` from `$(body.revision)` |
-| TriggerTemplate | `tekton-web-template`, params `git-url` and `git-revision` (default `main`) |
-| EventListener | `tekton-web-listener`, service account `pipeline`, using the binding and template above |
-| EventListener route | default hostname for the `el-tekton-web-listener` service |
-| Event payload | `{"git_url": "https://git.ocp4.example.com/developer/tekton-web.git", "revision": "main"}` |
-
-- The TriggerTemplate must create a `build-and-deploy` PipelineRun with `GIT_URL` and `GIT_REVISION` taken from the trigger params, while `IMAGE`, `APP_NAME`, the service account, and the workspace follow the first table.
-- Expose the EventListener through a route so it can be called from outside the cluster.
-- Send the payload above to the EventListener route with an HTTP POST. The event must create a new PipelineRun that ends `Succeeded`.
+- The TriggerTemplate must create a PipelineRun of the `maven-build-deploy` Pipeline with the `pipeline` service account, the `IMAGE` from the table, and the workspace PVC from the table. `GIT_URL` and `GIT_REVISION` must come from the trigger parameters.
+- Apply the TriggerBinding, TriggerTemplate, Trigger, and EventListener, then expose the `el-maven-listener` service through a route on its default hostname.
+- Send `{"git_url": "https://git.ocp4.example.com/developer/tekton-maven.git", "revision": "main"}` to the EventListener route with an HTTP POST. The event must create a new PipelineRun that ends `Succeeded`.
 
 ## Question 10 — Expose the internal registry and push an image
 

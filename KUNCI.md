@@ -481,227 +481,149 @@ curl health-app-deploy-health.apps.ocp4.example.com
 
 ## Kunci Soal 9
 
-Cek dulu nama parameter task di cluster kamu, karena bisa berbeda antar versi OpenShift Pipelines:
+Semua YAML sudah disediakan. Tugasnya menemukan nilai yang salah di `pipeline.yaml` dan `trigger-template.yaml`. Ada delapan nilai salah:
+
+| File | Lokasi | Nilai salah | Nilai benar | Gejala kalau dibiarkan |
+| --- | --- | --- | --- | --- |
+| `pipeline.yaml` | `fetch-source` → param `REVISION`/`revision` | `master` | `$(params.GIT_REVISION)` | clone gagal: `couldn't find remote ref master` |
+| `pipeline.yaml` | `build-image` → `DOCKERFILE` | `./Dockerfile` | `./Containerfile` | buildah gagal: file tidak ditemukan |
+| `pipeline.yaml` | `build-image` → build arg | `MAVEN_REPO=$(params.MAVEN_MIRROR_URL)` | `MAVEN_MIRROR_URL=$(params.MAVEN_MIRROR_URL)` | build berhenti: `ERROR: build arg MAVEN_MIRROR_URL is not set` |
+| `pipeline.yaml` | param `MAVEN_MIRROR_URL` → `default` | `https://repo.maven.apache.org/maven2` | `http://nexus-infra.apps.ocp4.example.com/repository/java` | Maven timeout karena lab tidak punya akses internet |
+| `trigger-template.yaml` | `pipelineRef.name` | `maven-pipeline` | `maven-build-deploy` | PipelineRun dari trigger gagal: pipeline tidak ditemukan |
+| `trigger-template.yaml` | `taskRunTemplate.serviceAccountName` | `default` | `pipeline` | kredensial Git tidak terpakai, push image ditolak |
+| `trigger-template.yaml` | param `IMAGE` | `.../openshift/tekton-maven:latest` | `.../pipeline-lab/tekton-maven:latest` | push ditolak (`unauthorized`) ke namespace `openshift` |
+| `trigger-template.yaml` | `workspaces` → `claimName` | `maven-pvc` | `maven-workspace` | PipelineRun tertahan, PVC tidak ditemukan |
+
+Nama build arg yang benar harus dicari di repo aplikasi. Jangan menebak:
 
 ```bash
-oc get tasks -n openshift-pipelines
-tkn task describe git-clone -n openshift-pipelines
-tkn task describe buildah -n openshift-pipelines
-tkn task describe openshift-client -n openshift-pipelines
+oc project pipeline-lab
+cd ~/ex288-set2/q9
+git clone https://git.ocp4.example.com/developer/tekton-maven.git /tmp/tekton-maven
+grep -n ARG /tmp/tekton-maven/Containerfile        # ARG MAVEN_MIRROR_URL
+cat /tmp/tekton-maven/settings.xml                 # <url>${env.MAVEN_MIRROR_URL}</url>
 ```
 
-Nilai yang dipakai: `GIT_URL=https://git.ocp4.example.com/developer/tekton-web.git`, `GIT_REVISION=main`, `IMAGE=image-registry.openshift-image-registry.svc:5000/pipeline-lab/tekton-web:latest`, `APP_NAME=tekton-web`.
+Cek juga nama parameter task di cluster. Prep sudah menulis YAML sesuai versi yang terpasang, jadi cukup ubah nilainya:
+
+```bash
+tkn task describe buildah -n openshift-pipelines   # BUILD_ARGS (array) atau BUILD_EXTRA_ARGS (string)
+tkn task describe git-clone -n openshift-pipelines # URL/REVISION atau url/revision
+```
 
 Kredensial Git untuk service account `pipeline`:
 
 ```bash
-oc project pipeline-lab
 oc create secret generic tekton-git --type=kubernetes.io/basic-auth \
   --from-literal=username=developer --from-literal=password=d3v3lop3r
 oc annotate secret tekton-git tekton.dev/git-0=https://git.ocp4.example.com
 oc secrets link pipeline tekton-git
+oc get sa pipeline -o yaml | grep -A5 '^secrets'    # pastikan tidak ada secret lain dengan URL yang sama
 ```
 
-Kalau `fetch-source` gagal dengan `cp: can't stat '/workspace/basic-auth/.git-credentials'`, berarti kamu mem-bind workspace `basic-auth` ke secret bertipe `kubernetes.io/basic-auth`. Workspace itu harus berisi file `.git-credentials` dan `.gitconfig`. Pilih salah satu:
-
-- Lepas binding `basic-auth` dan pakai secret beranotasi `tekton.dev/git-0` yang di-link ke SA `pipeline` seperti di atas (cara kunci ini).
-- Atau buat secret khusus untuk workspace itu, lalu bind sebagai `basic-auth` di task `fetch-source` dan sebagai `secret.secretName` di PipelineRun atau TriggerTemplate:
-
-```bash
-oc create secret generic tekton-git-basic-auth \
-  --from-literal=.git-credentials='https://developer:d3v3lop3r@git.ocp4.example.com' \
-  --from-literal=.gitconfig=$'[credential "https://git.ocp4.example.com"]\n\thelper = store\n'
-```
-
-Tambahkan dua task ini ke skeleton, di bawah `fetch-source`:
+### Perbaikan `pipeline.yaml`
 
 ```yaml
+  - name: MAVEN_MIRROR_URL
+    type: string
+    default: http://nexus-infra.apps.ocp4.example.com/repository/java   # <- diganti
+...
+  - name: fetch-source
+    ...
+    params:
+    - name: URL                     # atau url
+      value: $(params.GIT_URL)
+    - name: REVISION                # atau revision
+      value: $(params.GIT_REVISION)  # <- diganti, sebelumnya master
+...
   - name: build-image
-    runAfter:
-    - fetch-source
-    taskRef:
-      resolver: cluster
-      params:
-      - name: kind
-        value: task
-      - name: name
-        value: buildah
-      - name: namespace
-        value: openshift-pipelines
+    ...
     params:
     - name: IMAGE
       value: $(params.IMAGE)
     - name: DOCKERFILE
-      value: ./Containerfile
-    - name: TLSVERIFY
+      value: ./Containerfile         # <- diganti
+    - name: TLSVERIFY               # atau TLS_VERIFY
       value: "false"
-    workspaces:
-    - name: source
-      workspace: shared-workspace
-  - name: deploy
-    runAfter:
-    - build-image
-    taskRef:
-      resolver: cluster
-      params:
-      - name: kind
-        value: task
-      - name: name
-        value: openshift-client
-      - name: namespace
-        value: openshift-pipelines
-    params:
-    - name: SCRIPT
-      value: |
-        oc get deployment $(params.APP_NAME) >/dev/null 2>&1 || \
-          oc create deployment $(params.APP_NAME) --image=$(params.IMAGE) --port=8080
-        oc rollout restart deployment/$(params.APP_NAME)
-        oc rollout status deployment/$(params.APP_NAME) --timeout=180s
-        oc get service $(params.APP_NAME) >/dev/null 2>&1 || \
-          oc expose deployment $(params.APP_NAME) --port=8080
-        oc get route $(params.APP_NAME) >/dev/null 2>&1 || \
-          oc expose service $(params.APP_NAME)
-```
-
-Simpan sebagai `pipeline.yaml`, lalu buat `pipelinerun.yaml`:
-
-```yaml
-apiVersion: tekton.dev/v1
-kind: PipelineRun
-metadata:
-  generateName: build-and-deploy-run-
-spec:
-  pipelineRef:
-    name: build-and-deploy
-  taskRunTemplate:
-    serviceAccountName: pipeline
-  params:
-  - name: GIT_URL
-    value: https://git.ocp4.example.com/developer/tekton-web.git
-  - name: GIT_REVISION
-    value: main
-  - name: IMAGE
-    value: image-registry.openshift-image-registry.svc:5000/pipeline-lab/tekton-web:latest
-  - name: APP_NAME
-    value: tekton-web
-  workspaces:
-  - name: shared-workspace
-    volumeClaimTemplate:
-      spec:
-        accessModes:
-        - ReadWriteOnce
-        resources:
-          requests:
-            storage: 1Gi
+    # Kalau file berisi BUILD_ARGS (array):
+    - name: BUILD_ARGS
+      value:
+      - MAVEN_MIRROR_URL=$(params.MAVEN_MIRROR_URL)          # <- diganti, sebelumnya MAVEN_REPO=
+    # Kalau file berisi BUILD_EXTRA_ARGS (string):
+    # - name: BUILD_EXTRA_ARGS
+    #   value: --build-arg MAVEN_MIRROR_URL=$(params.MAVEN_MIRROR_URL)
 ```
 
 ```bash
+oc apply -f pvc.yaml
 oc apply -f pipeline.yaml
 oc create -f pipelinerun.yaml                       # generateName butuh create, bukan apply
 tkn pipelinerun logs -f --last
 tkn pipelinerun list                                # STATUS Succeeded
-oc get is tekton-web
-oc exec deploy/tekton-web -- printenv BUILT_BY      # tekton
-curl tekton-web-pipeline-lab.apps.ocp4.example.com
+oc get is tekton-maven
+oc exec deploy/tekton-maven -- printenv BUILT_BY    # tekton
+curl http://tekton-maven-pipeline-lab.apps.ocp4.example.com/expenses
 ```
 
-Jika `build-image` gagal menarik base image (`unauthorized`), buat secret `docker-registry` untuk `registry.ocp4.example.com:8443` lalu `oc secrets link pipeline <secret>`, kemudian jalankan PipelineRun baru.
+Membaca error per task:
 
-### Trigger dan EventListener
+```bash
+tkn pipelinerun logs --last -t fetch-source         # masalah revision / kredensial Git
+tkn pipelinerun logs --last -t build-image | grep -iE "error|MAVEN|mirror|Containerfile"
+```
 
-Simpan sebagai `triggers.yaml`:
+### Perbaikan `trigger-template.yaml`
 
 ```yaml
-apiVersion: triggers.tekton.dev/v1beta1
-kind: TriggerBinding
-metadata:
-  name: tekton-web-binding
-spec:
-  params:
-  - name: git-url
-    value: $(body.git_url)
-  - name: git-revision
-    value: $(body.revision)
----
-apiVersion: triggers.tekton.dev/v1beta1
-kind: TriggerTemplate
-metadata:
-  name: tekton-web-template
-spec:
-  params:
-  - name: git-url
-  - name: git-revision
-    default: main
-  resourcetemplates:
-  - apiVersion: tekton.dev/v1
-    kind: PipelineRun
-    metadata:
-      generateName: build-and-deploy-run-
     spec:
       pipelineRef:
-        name: build-and-deploy
+        name: maven-build-deploy          # <- diganti
       taskRunTemplate:
-        serviceAccountName: pipeline
+        serviceAccountName: pipeline      # <- diganti
       params:
       - name: GIT_URL
         value: $(tt.params.git-url)
       - name: GIT_REVISION
         value: $(tt.params.git-revision)
       - name: IMAGE
-        value: image-registry.openshift-image-registry.svc:5000/pipeline-lab/tekton-web:latest
+        value: image-registry.openshift-image-registry.svc:5000/pipeline-lab/tekton-maven:latest   # <- diganti
       - name: APP_NAME
-        value: tekton-web
+        value: tekton-maven
       workspaces:
-      - name: shared-workspace
-        volumeClaimTemplate:
-          spec:
-            accessModes:
-            - ReadWriteOnce
-            resources:
-              requests:
-                storage: 1Gi
----
-apiVersion: triggers.tekton.dev/v1beta1
-kind: EventListener
-metadata:
-  name: tekton-web-listener
-spec:
-  serviceAccountName: pipeline
-  triggers:
-  - name: tekton-web-trigger
-    bindings:
-    - ref: tekton-web-binding
-    template:
-      ref: tekton-web-template
+      - name: source
+        persistentVolumeClaim:
+          claimName: maven-workspace      # <- diganti
 ```
 
 ```bash
-oc apply -f triggers.yaml
-oc get triggerbinding,triggertemplate,eventlistener
-oc get pods -l eventlistener=tekton-web-listener      # pod el-tekton-web-listener-xxx Running
-oc get eventlistener tekton-web-listener \
+oc apply -f trigger-binding.yaml -f trigger-template.yaml -f trigger.yaml -f event-listener.yaml
+oc get eventlistener maven-listener \
   -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{"\n"}'   # True
+oc get pods -l eventlistener=maven-listener          # el-maven-listener-xxx Running
 
-oc expose service el-tekton-web-listener
-EL=$(oc get route el-tekton-web-listener -o jsonpath='{.spec.host}')
+oc expose service el-maven-listener --port=http-listener
+EL=$(oc get route el-maven-listener -o jsonpath='{.spec.host}')
 
 curl -X POST -H 'Content-Type: application/json' \
-  -d '{"git_url":"https://git.ocp4.example.com/developer/tekton-web.git","revision":"main"}' \
-  "http://$EL"                                          # balasan berisi eventID
+  -d '{"git_url":"https://git.ocp4.example.com/developer/tekton-maven.git","revision":"main"}' \
+  "http://$EL"                                        # balasan berisi eventID
 
-tkn pipelinerun list                                  # muncul run baru
-oc get pipelinerun -l triggers.tekton.dev/eventlistener=tekton-web-listener
+oc get pipelinerun -l triggers.tekton.dev/eventlistener=maven-listener
 tkn pipelinerun logs -f --last
 ```
 
-Penting: `$(tt.params.<nama>)` dipakai di dalam TriggerTemplate, bukan `$(params.<nama>)`. Nama service EventListener selalu diawali `el-`.
+Catatan:
 
-Kalau pod EventListener `CrashLoopBackOff` karena hak akses (`forbidden`), service account belum punya role triggers. Minta admin menambahkan:
+- PVC `maven-workspace` bertipe `ReadWriteOnce`. Tunggu run manual selesai sebelum mengirim event, supaya dua run tidak berebut PVC yang sama.
+- `$(tt.params.<nama>)` dipakai di TriggerTemplate, `$(params.<nama>)` dipakai di Pipeline. Nama service EventListener selalu diawali `el-`.
+- Kalau pod EventListener `CrashLoopBackOff` karena `forbidden`, service account `pipeline` belum punya role triggers. Prep sudah memberikannya, tapi kalau perlu diulang, jalankan sebagai admin:
 
 ```bash
 oc policy add-role-to-user tekton-triggers-eventlistener-roles -z pipeline -n pipeline-lab
 oc adm policy add-cluster-role-to-user tekton-triggers-eventlistener-clusterroles -z pipeline -n pipeline-lab
 ```
+
+- Kalau `build-image` gagal menarik base image dari `registry.ocp4.example.com:8443` (`unauthorized`), buat secret `docker-registry` untuk registry itu, beri anotasi `tekton.dev/docker-0=https://registry.ocp4.example.com:8443`, lalu `oc secrets link pipeline <secret>` dan jalankan PipelineRun baru.
 
 ## Kunci Soal 10
 

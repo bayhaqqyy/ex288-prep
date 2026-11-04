@@ -124,7 +124,7 @@ make_public() {
   if [ -z "$GITLAB_TOKEN" ]; then
     GITLAB_TOKEN="$(curl -sk --max-time 20 -X POST "https://${GIT_HOST}/oauth/token" \
       -d grant_type=password -d "username=${GIT_USER}" --data-urlencode "password=${GIT_PASS}" 2>/dev/null \
-      | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null)"
+      | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null || true)"
   fi
   if [ -z "$GITLAB_TOKEN" ]; then
     warn "Tidak bisa mengambil token GitLab. Ubah repo ${repo} jadi public manual: Settings > General > Visibility."
@@ -195,42 +195,125 @@ check_npm_pkg() {
   fi
 }
 
-# ===== Soal 9: Deploy lewat OpenShift Pipelines (Tekton) =====
+# ===== Soal 9: OpenShift Pipelines - perbaiki YAML pipeline + trigger (aplikasi Maven) =====
+# Peserta menerima YAML lengkap (PVC, Pipeline, PipelineRun, TriggerBinding,
+# TriggerTemplate, Trigger, EventListener). Pipeline dan TriggerTemplate
+# sengaja berisi nilai yang salah, termasuk build arg Maven mirror.
 WORK="${SET_DIR}/q9"
+NEXUS_JAVA="http://nexus-infra.apps.ocp4.example.com/repository/java"
 login_dev
-if ! oc get crd pipelines.tekton.dev >/dev/null 2>&1 && ! oc api-resources 2>/dev/null | grep -q '^pipelines '; then
+if ! oc api-resources --api-group=tekton.dev 2>/dev/null | grep -q '^pipelines '; then
   warn "CRD Tekton tidak terdeteksi. Pastikan operator OpenShift Pipelines terpasang."
 fi
-for t in git-clone buildah openshift-client; do
-  oc get task "$t" -n openshift-pipelines >/dev/null 2>&1 \
-    || warn "Task $t tidak terlihat di namespace openshift-pipelines (cek: oc get tasks -n openshift-pipelines)"
-done
 oc api-resources --api-group=triggers.tekton.dev 2>/dev/null | grep -q eventlisteners \
   || warn "CRD Tekton Triggers (EventListener) tidak terdeteksi. Bagian trigger Soal 9 butuh operator OpenShift Pipelines lengkap."
+curl -s --max-time 10 -o /dev/null "${NEXUS_JAVA}/" \
+  || warn "Nexus java (${NEXUS_JAVA}) tidak terjangkau. Build Maven bisa gagal karena lingkungan."
 reset_project pipeline-lab
 
-# Repo aplikasi
-rm -rf "$WORK"; mkdir -p "$WORK/repo"
-cd "$WORK/repo"
-cat > Containerfile <<EOF
-FROM ${CLASS_REGISTRY}/redhattraining/hello-world-nginx:v1.0
-LABEL org.opencontainers.image.title="tekton-web" \\
-      org.opencontainers.image.description="EX288 practice image built by Tekton"
+# Nama parameter task ClusterTask/cluster-resolver berbeda antar versi
+# OpenShift Pipelines, jadi YAML dibuat sesuai versi yang terpasang.
+task_params() {
+  local kc=""
+  [ "$ADMIN_OK" -eq 1 ] && kc="$ADMIN_KC"
+  KUBECONFIG="${kc:-$KUBECONFIG}" oc get task "$1" -n openshift-pipelines \
+    -o jsonpath='{range .spec.params[*]}{.name}{" "}{.type}{"\n"}{end}' 2>/dev/null
+}
+has_param() { echo "$1" | awk '{print $1}' | grep -qx "$2"; }
+pick() { # daftar-param kandidat... -> nama pertama yang ada
+  local list="$1" c; shift
+  for c in "$@"; do has_param "$list" "$c" && { echo "$c"; return; }; done
+  echo "$1"
+}
+GC="$(task_params git-clone)"; BH="$(task_params buildah)"; OC_T="$(task_params openshift-client)"
+[ -n "$GC" ] || warn "Task git-clone tidak terlihat di openshift-pipelines (cek: oc get tasks -n openshift-pipelines)"
+[ -n "$BH" ] || warn "Task buildah tidak terlihat di openshift-pipelines"
+[ -n "$OC_T" ] || warn "Task openshift-client tidak terlihat di openshift-pipelines"
+GC_URL="$(pick "$GC" URL url)"; GC_REV="$(pick "$GC" REVISION revision)"
+BH_TLS="$(pick "$BH" TLSVERIFY TLS_VERIFY)"
+OC_SCRIPT="$(pick "$OC_T" SCRIPT script)"
+# Build arg: BUILD_ARGS (array) kalau tersedia, kalau tidak BUILD_EXTRA_ARGS (string)
+if echo "$BH" | grep -qE '^BUILD_ARGS array'; then
+  BUILD_ARG_BLOCK='    - name: BUILD_ARGS
+      value:
+      - MAVEN_REPO=$(params.MAVEN_MIRROR_URL)'
+else
+  BUILD_ARG_BLOCK='    - name: BUILD_EXTRA_ARGS
+      value: --build-arg MAVEN_REPO=$(params.MAVEN_MIRROR_URL)'
+fi
+
+# ---------- Repo aplikasi Maven (sumber dari DO288-apps, sama seperti Soal 11) ----------
+rm -rf "$WORK"; mkdir -p "$WORK"
+cd "$WORK"
+if ! git clone -q --depth 1 "https://${GIT_USER}:${GIT_PASS}@${GIT_HOST}/${GIT_USER}/DO288-apps.git" apps-src; then
+  echo "Repo DO288-apps tidak ditemukan di GitLab lab. Soal 9 butuh repo bawaan kelas DO288."; exit 1
+fi
+SRC=""
+for cand in '*/docker-app/myapp1-docker' '*/builds-review/expense-service' \
+            '*/deployments-applications/expense-service' '*/expense-service'; do
+  SRC="$(find apps-src -type d -path "$cand" -not -path '*/.git/*' 2>/dev/null | sort | head -1)"
+  [ -n "$SRC" ] && [ -f "$SRC/pom.xml" ] && break
+  SRC=""
+done
+[ -n "$SRC" ] || { echo "Tidak ada proyek Maven (myapp1-docker / expense-service) di DO288-apps"; exit 1; }
+log "Memakai proyek Maven dari DO288-apps: ${SRC#apps-src/}"
+mkdir -p repo
+cp -r "$SRC"/. repo/
+rm -rf repo/.git repo/target repo/.s2i repo/Dockerfile repo/Containerfile apps-src
+
+# settings.xml membaca mirror dari env MAVEN_MIRROR_URL (diisi lewat build arg)
+cat > repo/settings.xml <<'EOF'
+<settings>
+  <mirrors>
+    <mirror>
+      <id>build-mirror</id>
+      <mirrorOf>*</mirrorOf>
+      <url>${env.MAVEN_MIRROR_URL}</url>
+    </mirror>
+  </mirrors>
+</settings>
+EOF
+
+cat > repo/Containerfile <<EOF
+FROM ${CLASS_REGISTRY}/redhattraining/ocpdev-ubi8-openjdk-17-base:1.16
+
+# URL Maven mirror wajib diisi saat build: --build-arg MAVEN_MIRROR_URL=<url>
+ARG MAVEN_MIRROR_URL
+
+COPY settings.xml pom.xml ./
+COPY src src
+RUN test -n "\${MAVEN_MIRROR_URL}" || { echo "ERROR: build arg MAVEN_MIRROR_URL is not set"; exit 1; } \\
+ && mvn -B -s settings.xml clean package -DskipTests
+
 ENV BUILT_BY=tekton
+EXPOSE 8080
+CMD java -jar \$(ls target/*-runner.jar target/quarkus-app/quarkus-run.jar 2>/dev/null | head -1)
 EOF
-cat > README.md <<'EOF'
-# tekton-web
-Aplikasi latihan EX288 yang di-build dan di-deploy lewat OpenShift Pipelines.
-EOF
-push_repo "$WORK/repo" tekton-web main
+EP="$(grep -rhoP '@Path\("\K[^"{]+' repo/src/main/java 2>/dev/null | head -1)"
+[ -n "$EP" ] && log "Endpoint REST aplikasi: ${EP}"
+push_repo "$WORK/repo" tekton-maven main
 cd "$HOME"; rm -rf "$WORK/repo"
 
-# Skeleton pipeline untuk dilengkapi peserta
-cat > "$WORK/pipeline-skeleton.yaml" <<'EOF'
+# ---------- YAML yang diberikan ke peserta ----------
+cat > "$WORK/pvc.yaml" <<'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: maven-workspace
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+EOF
+
+# Pipeline: nilai SALAH yang disengaja ditandai di kunci jawaban, bukan di sini.
+cat > "$WORK/pipeline.yaml" <<EOF
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: build-and-deploy
+  name: maven-build-deploy
 spec:
   params:
   - name: GIT_URL
@@ -242,8 +325,11 @@ spec:
     type: string
   - name: APP_NAME
     type: string
+  - name: MAVEN_MIRROR_URL
+    type: string
+    default: https://repo.maven.apache.org/maven2
   workspaces:
-  - name: shared-workspace
+  - name: source
   tasks:
   - name: fetch-source
     taskRef:
@@ -256,15 +342,170 @@ spec:
       - name: namespace
         value: openshift-pipelines
     params:
-    - name: URL
-      value: $(params.GIT_URL)
-    - name: REVISION
-      value: $(params.GIT_REVISION)
+    - name: ${GC_URL}
+      value: \$(params.GIT_URL)
+    - name: ${GC_REV}
+      value: master
     workspaces:
     - name: output
-      workspace: shared-workspace
-  # TODO 1: task "build-image" (buildah) setelah fetch-source
-  # TODO 2: task "deploy" (openshift-client) setelah build-image
+      workspace: source
+  - name: build-image
+    runAfter:
+    - fetch-source
+    taskRef:
+      resolver: cluster
+      params:
+      - name: kind
+        value: task
+      - name: name
+        value: buildah
+      - name: namespace
+        value: openshift-pipelines
+    params:
+    - name: IMAGE
+      value: \$(params.IMAGE)
+    - name: DOCKERFILE
+      value: ./Dockerfile
+    - name: ${BH_TLS}
+      value: "false"
+${BUILD_ARG_BLOCK}
+    workspaces:
+    - name: source
+      workspace: source
+  - name: deploy
+    runAfter:
+    - build-image
+    taskRef:
+      resolver: cluster
+      params:
+      - name: kind
+        value: task
+      - name: name
+        value: openshift-client
+      - name: namespace
+        value: openshift-pipelines
+    params:
+    - name: ${OC_SCRIPT}
+      value: |
+        oc get deployment \$(params.APP_NAME) >/dev/null 2>&1 || \\
+          oc create deployment \$(params.APP_NAME) --image=\$(params.IMAGE) --port=8080
+        oc rollout restart deployment/\$(params.APP_NAME)
+        oc rollout status deployment/\$(params.APP_NAME) --timeout=300s
+        oc get service \$(params.APP_NAME) >/dev/null 2>&1 || \\
+          oc expose deployment \$(params.APP_NAME) --port=8080
+        oc get route \$(params.APP_NAME) >/dev/null 2>&1 || \\
+          oc expose service \$(params.APP_NAME)
 EOF
+
+cat > "$WORK/pipelinerun.yaml" <<'EOF'
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: maven-build-deploy-run-
+spec:
+  pipelineRef:
+    name: maven-build-deploy
+  taskRunTemplate:
+    serviceAccountName: pipeline
+  params:
+  - name: GIT_URL
+    value: https://git.ocp4.example.com/developer/tekton-maven.git
+  - name: GIT_REVISION
+    value: main
+  - name: IMAGE
+    value: image-registry.openshift-image-registry.svc:5000/pipeline-lab/tekton-maven:latest
+  - name: APP_NAME
+    value: tekton-maven
+  workspaces:
+  - name: source
+    persistentVolumeClaim:
+      claimName: maven-workspace
+EOF
+
+cat > "$WORK/trigger-binding.yaml" <<'EOF'
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: maven-binding
+spec:
+  params:
+  - name: git-url
+    value: $(body.git_url)
+  - name: git-revision
+    value: $(body.revision)
+EOF
+
+cat > "$WORK/trigger-template.yaml" <<'EOF'
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: maven-template
+spec:
+  params:
+  - name: git-url
+  - name: git-revision
+    default: main
+  resourcetemplates:
+  - apiVersion: tekton.dev/v1
+    kind: PipelineRun
+    metadata:
+      generateName: maven-build-deploy-trigger-
+    spec:
+      pipelineRef:
+        name: maven-pipeline
+      taskRunTemplate:
+        serviceAccountName: default
+      params:
+      - name: GIT_URL
+        value: $(tt.params.git-url)
+      - name: GIT_REVISION
+        value: $(tt.params.git-revision)
+      - name: IMAGE
+        value: image-registry.openshift-image-registry.svc:5000/openshift/tekton-maven:latest
+      - name: APP_NAME
+        value: tekton-maven
+      workspaces:
+      - name: source
+        persistentVolumeClaim:
+          claimName: maven-pvc
+EOF
+
+cat > "$WORK/trigger.yaml" <<'EOF'
+apiVersion: triggers.tekton.dev/v1beta1
+kind: Trigger
+metadata:
+  name: maven-trigger
+spec:
+  serviceAccountName: pipeline
+  bindings:
+  - ref: maven-binding
+  template:
+    ref: maven-template
+EOF
+
+cat > "$WORK/event-listener.yaml" <<'EOF'
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: maven-listener
+spec:
+  serviceAccountName: pipeline
+  triggers:
+  - triggerRef: maven-trigger
+EOF
+
+# Hak akses EventListener untuk SA pipeline (bukan bagian dari soal)
+if [ "$ADMIN_OK" -eq 1 ]; then
+  KUBECONFIG="$ADMIN_KC" oc policy add-role-to-user tekton-triggers-eventlistener-roles \
+    -z pipeline -n pipeline-lab >/dev/null 2>&1 \
+    || warn "Gagal memberi role tekton-triggers-eventlistener-roles ke SA pipeline."
+  KUBECONFIG="$ADMIN_KC" oc adm policy add-cluster-role-to-user tekton-triggers-eventlistener-clusterroles \
+    -z pipeline -n pipeline-lab >/dev/null 2>&1 \
+    || warn "Gagal memberi role tekton-triggers-eventlistener-clusterroles ke SA pipeline. EventListener bisa CrashLoopBackOff (forbidden)."
+else
+  warn "Tidak bisa login admin. Kalau pod EventListener forbidden, beri role triggers ke SA pipeline (lihat kunci)."
+fi
+
 store_git_cred
-log "Soal 9 siap. Project: pipeline-lab. Skeleton: $WORK/pipeline-skeleton.yaml"
+log "Soal 9 siap. Project: pipeline-lab. YAML ada di $WORK:"
+ls -1 "$WORK" | sed 's/^/    /'

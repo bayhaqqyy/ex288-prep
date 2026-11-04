@@ -124,7 +124,7 @@ make_public() {
   if [ -z "$GITLAB_TOKEN" ]; then
     GITLAB_TOKEN="$(curl -sk --max-time 20 -X POST "https://${GIT_HOST}/oauth/token" \
       -d grant_type=password -d "username=${GIT_USER}" --data-urlencode "password=${GIT_PASS}" 2>/dev/null \
-      | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null)"
+      | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null || true)"
   fi
   if [ -z "$GITLAB_TOKEN" ]; then
     warn "Tidak bisa mengambil token GitLab. Ubah repo ${repo} jadi public manual: Settings > General > Visibility."

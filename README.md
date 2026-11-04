@@ -21,7 +21,7 @@ Set latihan untuk ujian **EX288 (Red Hat Certified OpenShift Application Develop
 | 6 | Template build + deploy (`REGISTRY_URL`, label, selector) | `lion` |
 | 7 | Helm lab + production (limit, replicas, TLS, hostname) | `webstore-lab`, `webstore-prod` |
 | 8 | Startup, liveness, readiness probe | `deploy-health` |
-| 9 | OpenShift Pipelines (Tekton): git-clone → buildah → deploy | `pipeline-lab` |
+| 9 | OpenShift Pipelines Maven: perbaiki YAML Pipeline + TriggerTemplate (build arg Maven mirror) | `pipeline-lab` |
 | 10 | Expose internal registry + push dengan podman | `registry-lab` |
 
 Soal tambahan (11–16), diambil dari materi referensi Devopswala yang lain:
